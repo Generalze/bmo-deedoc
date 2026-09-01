@@ -80,7 +80,7 @@ export function AgentSessionTracker() {
       }
 
       clearSession();
-      router.replace(`/agent/login?reason=${encodeURIComponent(reason)}`);
+      router.replace(`/login?field=1&reason=${encodeURIComponent(reason)}`);
     }
 
     async function sendLocation(position: GeolocationPosition) {
