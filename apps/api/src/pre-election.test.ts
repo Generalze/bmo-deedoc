@@ -160,9 +160,9 @@ async function registerMember(label: string, referralCode: string | null, sha256
       password,
       voterCardNumber: `PRE-ELECTION-VIN-${label}`,
       stateId,
-      senatorialDistrictId,
-      federalConstituencyId,
-      stateConstituencyId,
+      // The three constituency ids are no longer part of the request contract;
+      // the server derives them from the ward and refuses a caller that sends
+      // them. The fixture's ward still resolves to the same chain.
       lgaId,
       wardId,
       pollingUnitId,

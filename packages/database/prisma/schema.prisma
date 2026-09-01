@@ -2666,6 +2666,10 @@ model Ward {
   sourceNameAliases        String[]                    @default([])
   referenceImportReleaseId String?
   referenceImportedAt      DateTime?
+  stateConstituencyEdgeInferred       Boolean          @default(false)
+  stateConstituencyEdgeInferenceBasis String?
+  stateConstituencyEdgeReviewedAt     DateTime?
+  stateConstituencyEdgeReviewedBy     String?
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   state                    State                       @relation(fields: [stateId], references: [id], onDelete: Cascade)
@@ -2698,6 +2702,7 @@ model Ward {
   @@index([lgaId])
   @@index([stateConstituencyId])
   @@index([referenceImportReleaseId])
+  @@index([stateConstituencyEdgeInferred])
 }
 
 model StateConstituency {

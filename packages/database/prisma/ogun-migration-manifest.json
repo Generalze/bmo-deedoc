@@ -61,6 +61,10 @@
     {
       "name": "20260812090000_legacy_reconciliation_policy",
       "sha256": "956a16de6aff853f1c3d07e1715a53be0a479708cdf2913710171f1d6b3c486c"
+    },
+    {
+      "name": "20260902090000_ward_constituency_edge_provenance",
+      "sha256": "e447686140051b46ab7bb8cd089f0d16cce73a4268200e4b3bb9e4b9664cb148"
     }
   ]
 }

@@ -27,7 +27,8 @@
     "seed": "tsx prisma/seed.ts",
     "seed:credentials": "tsx scripts/print-seeded-credentials.ts",
     "bootstrap:check": "tsx scripts/check-bootstrap.ts",
-    "migrate:legacy-balances": "tsx scripts/migrate-legacy-balances.ts"
+    "migrate:legacy-balances": "tsx scripts/migrate-legacy-balances.ts",
+    "backfill:member-ancestry": "tsx scripts/backfill-member-ancestry.ts"
   },
   "dependencies": {
     "@pics-nigeria/shared": "1.0.0",

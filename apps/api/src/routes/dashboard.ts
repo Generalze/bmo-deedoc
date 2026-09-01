@@ -72,16 +72,30 @@ function territoryFor(level: DashboardLevel, territoryId: string): OperationalTe
   }
 }
 
+/**
+ * Members are counted through the ward graph, not through their own columns.
+ *
+ * The three constituency columns on VoterProfile are nullable and, before
+ * server-side derivation, were whatever the registration form happened to send
+ * — in practice nothing. Counting on them made every member registered through
+ * the product invisible at the Senatorial, Federal and State Constituency
+ * levels, so those dashboards banded CRITICAL regardless of real strength.
+ *
+ * Joining through `ward` asks the canonical graph instead, which is the same
+ * source `deriveMemberAncestryFromWard` writes from and the same one
+ * `pollingUnitWhereFor` below already used. It is also correct for rows the
+ * backfill has not reached yet: a member's ward is not nullable.
+ */
 function voterWhereFor(level: DashboardLevel, territoryId: string): Prisma.VoterProfileWhereInput {
   switch (level) {
     case "STATE":
       return { stateId: territoryId };
     case "SENATORIAL_DISTRICT":
-      return { senatorialDistrictId: territoryId };
+      return { ward: { stateConstituency: { federalConstituency: { senatorialDistrictId: territoryId } } } };
     case "FEDERAL_CONSTITUENCY":
-      return { federalConstituencyId: territoryId };
+      return { ward: { stateConstituency: { federalConstituencyId: territoryId } } };
     case "STATE_CONSTITUENCY":
-      return { stateConstituencyId: territoryId };
+      return { ward: { stateConstituencyId: territoryId } };
     case "WARD":
       return { wardId: territoryId };
     case "POLLING_UNIT":

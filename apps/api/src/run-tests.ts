@@ -2,6 +2,7 @@ import { runAdminGlobalStructureTests } from "./admin-global-structures.test";
 import { runCandidatePublicTests } from "./candidate-public.test";
 import { runElectionDayTests } from "./election-day.test";
 import { runEvidenceTests } from "./evidence.test";
+import { runMemberAncestryTests } from "./member-ancestry.test";
 import { runPhase1ArchitectureTests } from "./phase1-architecture.test";
 import { runPreElectionTests } from "./pre-election.test";
 import { runRealtimeTests } from "./realtime.test";
@@ -11,6 +12,7 @@ void (async () => {
   await runCandidatePublicTests();
   await runElectionDayTests();
   await runEvidenceTests();
+  await runMemberAncestryTests();
   await runPhase1ArchitectureTests();
   await runPreElectionTests();
   await runRealtimeTests();

@@ -71,8 +71,19 @@ function readArg(name: string) {
   return args[index + 1] || null;
 }
 
+/**
+ * Release file checksums are taken over LF-canonicalised bytes.
+ *
+ * The CSVs are stored with LF and the manifest records LF hashes, but a Windows
+ * checkout rewrites them with CRLF, so hashing the raw bytes made a correct,
+ * unmodified release fail verification on one platform and pass on another.
+ * Canonicalising here matches what the migration integrity manifest already
+ * declares for the same reason ("UTF-8 with LF line endings") and makes the
+ * checksum a statement about content rather than about the checkout.
+ */
 function sha256(filePath: string) {
-  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  const canonical = readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 function requireText(row: CsvRow, key: string) {
@@ -256,6 +267,8 @@ export function validateIdentityRelease(releaseDir: string, manifest: OgunRefere
   territories: TerritoryRow[];
   commandRelationships: CommandRelationshipRow[];
   lgaMemberships: LgaMembershipRow[];
+  /** Ward canonical id -> why its State Constituency edge is only inferred. */
+  inferredWardEdges: Map<string, string>;
 }> {
   const failures: string[] = [];
   const territoriesFile = resolveReleaseFile(releaseDir, manifest.files.territories!.path);
@@ -468,7 +481,110 @@ export function validateIdentityRelease(releaseDir: string, manifest: OgunRefere
     }
   }
 
-  return failures.length > 0 ? { value: null, failures } : { value: { territories, commandRelationships, lgaMemberships }, failures: [] };
+  /**
+   * Edges the release build could not source, only infer.
+   *
+   * The build records them by LGA and Ward *name*, which is what a reviewer
+   * reads, so they are resolved back to canonical ids here against this same
+   * release. `@@unique([lgaId, name])` on Ward makes that pairing unambiguous.
+   * An edge that cannot be resolved is a failure rather than a silent omission:
+   * dropping one would present an inferred edge as sourced, which is the exact
+   * outcome the file exists to prevent.
+   */
+  const inferredWardEdges = new Map<string, string>();
+  if (manifest.files.inferredEdges) {
+    const inferredFile = resolveReleaseFile(releaseDir, manifest.files.inferredEdges.path);
+    assertSha(inferredFile, manifest.files.inferredEdges.sha256, "inferredEdges", failures);
+    if (failures.length === 0) {
+      const lgaIdByName = new Map<string, string>();
+      for (const territory of territories.filter((item) => item.kind === "LGA")) {
+        lgaIdByName.set(territory.name.trim().toUpperCase(), territory.canonicalId);
+      }
+      const wardIdByLgaAndName = new Map<string, string>();
+      /**
+       * One of the 56 rows identifies its ward by the build's internal
+       * `lgaSourceCode:wardSourceCode` key rather than by name, because a
+       * different branch of the build produced it. Both forms resolve here, so
+       * the odd row is placed rather than dropped — dropping it would leave an
+       * inferred edge looking sourced, which is what this file exists to stop.
+       */
+      const wardIdBySourceKey = new Map<string, string>();
+      const lgaSourceCodeById = new Map<string, string>();
+      for (const territory of territories.filter((item) => item.kind === "LGA")) {
+        if (territory.sourceCode) {
+          lgaSourceCodeById.set(territory.canonicalId, territory.sourceCode.trim());
+        }
+      }
+      for (const territory of territories.filter((item) => item.kind === "WARD")) {
+        wardIdByLgaAndName.set(`${territory.lgaId}::${territory.name.trim().toUpperCase()}`, territory.canonicalId);
+        const lgaSourceCode = territory.lgaId ? lgaSourceCodeById.get(territory.lgaId) : undefined;
+        if (lgaSourceCode && territory.sourceCode) {
+          wardIdBySourceKey.set(`${lgaSourceCode}:${territory.sourceCode.trim()}`, territory.canonicalId);
+        }
+      }
+
+      const wardById = new Map(
+        territories.filter((item) => item.kind === "WARD").map((item) => [item.canonicalId, item] as const),
+      );
+
+      /**
+       * A ward can appear more than once.
+       *
+       * The build infers an edge, and may later move a ward to a constituency
+       * that would otherwise have none — appending a second row for the same
+       * ward without retracting the first. Both rows agree the edge is
+       * inferred, which is the fact that matters here; they disagree only about
+       * the target. The row matching the edge territories.csv actually records
+       * is the surviving one, and its basis is the honest description. Rows
+       * naming a different constituency are superseded, not authoritative.
+       *
+       * If a ward appears and *no* row matches the edge that was actually
+       * loaded, the release contradicts itself about that ward and the import
+       * refuses rather than picking one.
+       */
+      const rowsByWard = new Map<string, Array<{ rowNumber: number; declared: string; basis: string }>>();
+
+      readCsv(inferredFile).forEach((row, index) => {
+        const rowNumber = index + 2;
+        const lgaName = requireText(row, "lga").trim().toUpperCase();
+        const wardField = requireText(row, "ward").trim();
+        const basis = requireText(row, "basis").trim();
+        const lgaId = lgaIdByName.get(lgaName);
+        if (!lgaId) {
+          failures.push(`INFERRED-EDGES.csv row ${rowNumber}: unknown Ogun LGA '${row.lga}'.`);
+          return;
+        }
+        const wardId =
+          wardIdByLgaAndName.get(`${lgaId}::${wardField.toUpperCase()}`) ?? wardIdBySourceKey.get(wardField);
+        if (!wardId) {
+          failures.push(`INFERRED-EDGES.csv row ${rowNumber}: no ward '${row.ward}' in LGA '${row.lga}'.`);
+          return;
+        }
+        rowsByWard.set(wardId, [
+          ...(rowsByWard.get(wardId) || []),
+          { rowNumber, declared: requireText(row, "stateConstituency").trim(), basis: basis || "inferred" },
+        ]);
+      });
+
+      for (const [wardId, rows] of rowsByWard) {
+        const actual = wardById.get(wardId)?.stateConstituencyId ?? null;
+        const surviving = rows.find((row) => !row.declared || row.declared === actual);
+        if (!surviving) {
+          failures.push(
+            `INFERRED-EDGES.csv rows ${rows.map((row) => row.rowNumber).join(", ")}: ward ${wardId} is recorded against ${rows
+              .map((row) => row.declared)
+              .join(", ")}, but territories.csv records ${actual ?? "none"}.`,
+          );
+          continue;
+        }
+        inferredWardEdges.set(wardId, surviving.basis);
+      }
+    }
+  }
+
+  return failures.length > 0
+    ? { value: null, failures }
+    : { value: { territories, commandRelationships, lgaMemberships, inferredWardEdges }, failures: [] };
 }
 
 export function validateGeodataRelease(releaseDir: string, manifest: OgunReferenceReleaseManifest): ValidationResult<PollingUnitGeodataRow[]> {
@@ -591,7 +707,7 @@ async function applyIdentityRelease(
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
     const importedAt = new Date();
-    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0 };
+    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0, inferredWardEdges: 0 };
 
     for (const item of payload.territories.filter((territory) => territory.kind === "LGA")) {
       await transactionAny.lGA.upsert({
@@ -664,6 +780,14 @@ async function applyIdentityRelease(
     }
 
     for (const item of payload.territories.filter((territory) => territory.kind === "WARD")) {
+      /**
+       * The import owns whether an edge was inferred; it never owns whether a
+       * human has since reviewed one. The review columns are deliberately
+       * absent from both branches so re-importing a release cannot revoke a
+       * completed review, and a ward that has dropped off the inferred list is
+       * cleared rather than left flagged.
+       */
+      const inferenceBasis = payload.inferredWardEdges.get(item.canonicalId) ?? null;
       await transactionAny.ward.upsert({
         where: { id: item.canonicalId },
         update: {
@@ -676,6 +800,8 @@ async function applyIdentityRelease(
           sourceNameAliases: item.aliases,
           referenceImportReleaseId: release.id,
           referenceImportedAt: importedAt,
+          stateConstituencyEdgeInferred: inferenceBasis !== null,
+          stateConstituencyEdgeInferenceBasis: inferenceBasis,
         },
         create: {
           id: item.canonicalId,
@@ -688,9 +814,14 @@ async function applyIdentityRelease(
           sourceNameAliases: item.aliases,
           referenceImportReleaseId: release.id,
           referenceImportedAt: importedAt,
+          stateConstituencyEdgeInferred: inferenceBasis !== null,
+          stateConstituencyEdgeInferenceBasis: inferenceBasis,
         },
       });
       counts.wards += 1;
+      if (inferenceBasis !== null) {
+        counts.inferredWardEdges += 1;
+      }
     }
 
     for (const item of payload.territories.filter((territory) => territory.kind === "POLLING_UNIT")) {

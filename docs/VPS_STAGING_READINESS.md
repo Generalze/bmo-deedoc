@@ -161,11 +161,30 @@ surfaced, and they gate real-user exposure independently of infrastructure work.
 - **Only then** perform TURN relay validation — items 10 and 11 of the staging
   list cannot pass before this
 
-### 4. Member ancestry
-- Derive State → Senatorial District → Federal Constituency → State Constituency → Ward → Polling Unit
-- Populate ancestry on the real registration/write path
-- Repair or backfill existing compatible records
-- Dashboards must read real ancestry, not nullable denormalised columns
+### 4. Member ancestry — CODE PATH CLOSED, OPERATIONALLY BLOCKED
+- ~~Derive State → Senatorial District → Federal Constituency → State Constituency → Ward → Polling Unit~~ — `apps/api/src/lib/member-ancestry.ts`
+- ~~Populate ancestry on the real registration/write path~~ — derived inside the registration transaction; the three constituency ids were removed from the public request contract
+- ~~Repair or backfill existing compatible records~~ — `npm run backfill:member-ancestry` (dry-run / apply, idempotent)
+- ~~Dashboards must read real ancestry, not nullable denormalised columns~~ — the command dashboard scopes members by joining through the ward graph
+
+**This does not make member ancestry operationally complete.** 55 of the 236
+ward → State Constituency edges in the Ogun identity release are inferred and
+still unreviewed (recorded as 56 rows; one ward is listed twice, the earlier
+row superseded). Registration on those wards fails closed with
+`ANCESTRY_EDGE_UNREVIEWED`, and the backfill reports but never repairs members
+sitting on them. Those wards cannot register members until the edges are
+reviewed, which is a data-governance action and not an engineering one.
+
+See [`docs/MEMBER_ANCESTRY.md`](MEMBER_ANCESTRY.md).
+
+| Aspect | Status |
+|---|---|
+| Code path | Implemented |
+| Registration derivation | Server-owned |
+| Compatible reviewed records | Backfillable |
+| Unreviewed inferred mappings | Fail-closed / operationally blocked |
+| Operational completeness | Pending human review of the 56 inferred edges |
+| Production readiness | Not claimed |
 
 ### 5. Voter-card upload
 - Perform an actual private-object-storage upload
