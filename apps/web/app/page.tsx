@@ -5,6 +5,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublicAccessShell } from "../components/public-access-shell";
 import { loginUser } from "../lib/api";
+import { saveSession } from "../lib/session";
 
 export default function HomePage() {
   const router = useRouter();
@@ -26,7 +27,7 @@ export default function HomePage() {
         return;
       }
 
-      localStorage.setItem("picsNigeriaToken", data.token);
+      saveSession(data.token);
       router.push("/dashboard");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Login failed.");

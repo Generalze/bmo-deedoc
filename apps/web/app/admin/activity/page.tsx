@@ -7,6 +7,7 @@ import { ApiError, fetchAuditLogs, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import { readSession } from "../../../lib/session";
 
 const actionOptions = [
   "",
@@ -93,9 +94,9 @@ export default function AdminActivityPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -112,7 +113,7 @@ export default function AdminActivityPage() {
   }, [auditLogs]);
 
   async function handleApplyFilters() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -168,7 +169,7 @@ export default function AdminActivityPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone="error" message={error} />
 
       <section className="panel card">

@@ -72,7 +72,13 @@ export default function RegisterPage() {
 
     async function loadStates() {
       try {
-        setStates(await fetchPublicStates());
+        const availableStates = await fetchPublicStates();
+        setStates(availableStates);
+        // Ogun-only: selecting the single state for the registrant removes a
+        // dead step and unblocks the dependent LGA lookup straight away.
+        if (availableStates.length === 1) {
+          setForm((current) => (current.stateId ? current : { ...current, stateId: availableStates[0].id }));
+        }
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : "Could not load registration options.");
       }
@@ -257,14 +263,17 @@ export default function RegisterPage() {
 
           <label className="field">
             <span>State</span>
-            <select value={form.stateId} onChange={(event) => setForm({ ...form, stateId: event.target.value })} required>
-              <option value="">Select state</option>
+            <select value={form.stateId} onChange={(event) => setForm({ ...form, stateId: event.target.value })} required disabled={states.length <= 1}>
+              {states.length === 1 ? null : <option value="">Select state</option>}
               {states.map((state) => (
                 <option key={state.id} value={state.id}>
                   {state.name}
                 </option>
               ))}
             </select>
+            <small className="muted">
+              This platform operates in Ogun State only. Registration is limited to Ogun State residents.
+            </small>
           </label>
 
           <label className="field">

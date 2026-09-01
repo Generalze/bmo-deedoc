@@ -499,6 +499,13 @@ export async function fetchPreElectionRewardBalance(token: string, userId?: stri
     pendingPotentialPoints: number;
     reservedPayoutPoints: number;
     availablePoints: number;
+    /** Preserved legacy value awaiting an approved ratio. Never spendable. */
+    legacyCarryoverPendingPoints: number;
+    /** Legacy value already converted; included in confirmedPoints. */
+    legacyCarryoverConfirmedPoints: number;
+    /** Legacy-era claims counted in reservedPayoutPoints. Diagnostic only. */
+    preCutoverReservedPoints: number;
+    payablePoints: number;
   }>(response);
 }
 
@@ -920,6 +927,146 @@ export async function fetchAdminRedemptions(token: string): Promise<RewardRedemp
 
   const payload = await readJson<{ redemptions: RewardRedemptionItem[] }>(response);
   return payload.redemptions;
+}
+
+/**
+ * Advance a member redemption.
+ *
+ * These three had no client at all, so the admin redemption queue rendered rows
+ * nobody could act on and the payment reference the API requires had no caller.
+ */
+export async function approveAdminRedemption(token: string, redemptionId: string, body: { note?: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/redemptions/${encodeURIComponent(redemptionId)}/approve`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; redemption: RewardRedemptionItem }>(response);
+}
+
+export async function rejectAdminRedemption(token: string, redemptionId: string, body: { note?: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/redemptions/${encodeURIComponent(redemptionId)}/reject`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; redemption: RewardRedemptionItem }>(response);
+}
+
+/**
+ * `paymentReference` is required and must come from the operator — it is the
+ * identifier that ties this payment to a real bank transaction and makes it
+ * non-repeatable. Never generate one.
+ */
+export async function payAdminRedemption(
+  token: string,
+  redemptionId: string,
+  body: { paymentReference: string; proofStorageKey?: string; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/admin/redemptions/${encodeURIComponent(redemptionId)}/paid`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; redemption: RewardRedemptionItem }>(response);
+}
+
+export type LegacyReconciliationPolicy = {
+  id: string;
+  version: string;
+  conversionRatio: string;
+  status: "DRAFT" | "APPROVED" | "RETIRED";
+  rationale: string | null;
+  approvedAt: string | null;
+  approvedByUserId: string | null;
+  createdAt: string;
+};
+
+export async function fetchLegacyReconciliationPolicies(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/legacy-reconciliation-policy`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ policies: LegacyReconciliationPolicy[]; approvedPolicyCount: number }>(response);
+}
+
+export async function draftLegacyReconciliationPolicy(
+  token: string,
+  body: { version: string; conversionRatio: number; rationale?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/legacy-reconciliation-policy`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; policy: LegacyReconciliationPolicy }>(response);
+}
+
+export async function approveLegacyReconciliationPolicy(token: string, policyId: string) {
+  const response = await fetch(
+    `${API_BASE_URL}/pre-election/rewards/legacy-reconciliation-policy/${encodeURIComponent(policyId)}/approve`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  return readJson<{ message: string; policy: LegacyReconciliationPolicy }>(response);
+}
+
+export type LegacyCarryoverRow = {
+  id: string;
+  userId: string;
+  memberName: string;
+  legacyPointBalance: number;
+  status: string;
+  conversionRatio: string | null;
+  reconciliationRuleVersion: string | null;
+  creditedPoints: number | null;
+  rowChecksum: string;
+};
+
+export type LegacyMigrationBatchRow = {
+  id: string;
+  executedAt: string;
+  sourceLedger: string;
+  memberCount: number;
+  beforeTotalPoints: number;
+  migratedTotalPoints: number;
+  pendingTotalPoints: number;
+  reconciledTotalPoints: number;
+  snapshotChecksum: string;
+};
+
+export async function fetchLegacyCarryover(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/legacy-carryover`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ carryovers: LegacyCarryoverRow[]; batches: LegacyMigrationBatchRow[] }>(response);
+}
+
+/**
+ * The ratio and rule version are NOT sent: the server derives both from the
+ * approved policy, and its schema rejects a request that tries to supply them.
+ */
+export async function reconcileLegacyCarryover(token: string, body: { carryoverId: string; note?: string }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/legacy-carryover/reconcile`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; carryover: Record<string, unknown> }>(response);
+}
+
+export async function fetchActivePayoutConfiguration(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/configurations/active`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ payoutConfiguration: { id: string; minimumPoints: number; pointConversionRate: string } | null }>(
+    response,
+  );
 }
 
 export async function fetchAdminRewardLedger(

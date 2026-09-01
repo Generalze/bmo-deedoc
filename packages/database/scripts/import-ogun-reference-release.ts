@@ -583,6 +583,10 @@ async function applyIdentityRelease(
   manifestPath: string,
   payload: NonNullable<ReturnType<typeof validateIdentityRelease>["value"]>,
 ) {
+  // A full Ogun identity release is 20 LGAs, 236 wards and 5,042 polling units.
+  // Prisma's 5s interactive default expires part-way through, which would leave
+  // the import looking flaky rather than slow; the whole release must land in
+  // one transaction or not at all.
   return getPrisma().$transaction(async (transaction) => {
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
@@ -720,7 +724,7 @@ async function applyIdentityRelease(
     }
 
     return counts;
-  });
+  }, { timeout: 600_000, maxWait: 30_000 });
 }
 
 async function applyGeodataRelease(
@@ -728,6 +732,10 @@ async function applyGeodataRelease(
   manifestPath: string,
   rows: PollingUnitGeodataRow[],
 ) {
+  // A full Ogun identity release is 20 LGAs, 236 wards and 5,042 polling units.
+  // Prisma's 5s interactive default expires part-way through, which would leave
+  // the import looking flaky rather than slow; the whole release must land in
+  // one transaction or not at all.
   return getPrisma().$transaction(async (transaction) => {
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);

@@ -28,6 +28,7 @@ import { AdminNav } from "../../../components/admin-nav";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import { readSession } from "../../../lib/session";
 
 const adminLevels: AdminLevel[] = ["NATIONAL", "GEO_POLITICAL_ZONE", "STATE", "SENATORIAL", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "LGA", "WARD"];
 const officeTypes: CandidateOfficeType[] = ["PRESIDENTIAL", "GOVERNORSHIP", "SENATE", "HOUSE_OF_REP", "STATE_ASSEMBLY", "CHAIRMANSHIP", "COUNCILLOR"];
@@ -117,9 +118,9 @@ export default function AdminCommunicationsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -129,7 +130,7 @@ export default function AdminCommunicationsPage() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !form.stateId) {
       setLgas([]);
       return;
@@ -139,7 +140,7 @@ export default function AdminCommunicationsPage() {
   }, [form.stateId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !form.stateId || !form.lgaId) {
       setWards([]);
       return;
@@ -160,7 +161,7 @@ export default function AdminCommunicationsPage() {
   }
 
   async function handlePreview() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -194,7 +195,7 @@ export default function AdminCommunicationsPage() {
   }
 
   async function submitCommunication() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -295,7 +296,7 @@ export default function AdminCommunicationsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone="error" message={error} />
       <FeedbackBanner tone="success" message={message} />
 

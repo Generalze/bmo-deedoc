@@ -14,6 +14,7 @@ import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
+import { readSession } from "../../../lib/session";
 
 const statusOptions = ["", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"] as const;
 
@@ -46,9 +47,9 @@ export default function AdminElectionReportsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -62,7 +63,7 @@ export default function AdminElectionReportsPage() {
   }, []);
 
   async function handleApplyFilters() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -87,7 +88,7 @@ export default function AdminElectionReportsPage() {
       return;
     }
 
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -113,7 +114,7 @@ export default function AdminElectionReportsPage() {
   }
 
   async function openAsset(assetId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -171,7 +172,7 @@ export default function AdminElectionReportsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
       <section className="panel card">

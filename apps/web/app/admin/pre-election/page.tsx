@@ -4,6 +4,9 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { OGUN_STATE_ID, type AuthUserProfile } from "@pics-nigeria/shared";
 import { AdminNav } from "../../../components/admin-nav";
+import { PaymentReferenceDialog } from "../../../components/payment-reference-dialog";
+import { DataTable, Notice, StatusPill, formatCount, formatMoney } from "../../../components/ui";
+import { describeApiError, type DescribedError } from "../../../lib/api-errors";
 import {
   ApiError,
   accessPreElectionVerificationDocument,
@@ -36,6 +39,7 @@ import {
   type PreElectionStrengthDashboard,
   type PreElectionVerificationCase,
 } from "../../../lib/api";
+import { readSession } from "../../../lib/session";
 
 const verificationStatuses = ["PENDING", "UNDER_REVIEW", "RESUBMISSION_REQUIRED", "VERIFIED", "REJECTED"];
 const referralStatuses = ["PENDING_VERIFICATION", "QUALIFIED", "REJECTED", "FLAGGED", "REWARD_PROCESSED"];
@@ -81,8 +85,46 @@ export default function AdminPreElectionPage() {
   const [payoutCycleForm, setPayoutCycleForm] = useState({ name: "Weekly Pre-Election Cycle", opensAt: "", closesAt: "", payoutDate: "" });
   const [payoutBatchForm, setPayoutBatchForm] = useState({ cycleId: "", payoutOfficerUserId: "" });
   const [targetForm, setTargetForm] = useState({ metric: "VERIFIED_MEMBERS", targetValue: "100" });
+  const [payoutBusy, setPayoutBusy] = useState<string | null>(null);
+  const [payingAssignment, setPayingAssignment] = useState<PreElectionPayoutAssignment | null>(null);
+  const [payoutProblem, setPayoutProblem] = useState<DescribedError | null>(null);
+  const [payoutMessage, setPayoutMessage] = useState<string | null>(null);
+  /**
+   * Learned from the first refusal rather than guessed: the API reports the
+   * kill switch inside its 409 body. Once we have seen it, the pay buttons
+   * disable themselves so the operator is not invited to try again.
+   */
+  const [payoutExecutionEnabled, setPayoutExecutionEnabled] = useState<boolean | null>(null);
 
-  const token = typeof window === "undefined" ? null : localStorage.getItem("picsNigeriaAdminToken");
+  const token = typeof window === "undefined" ? null : readSession();
+
+  /**
+   * Every payout mutation goes through here. Before this, four of them were
+   * `fn(...).then(() => reload())` with no .catch at all — and because payout
+   * execution is disabled by default in every environment, the default
+   * experience of the primary money button was that nothing happened and
+   * nothing was said.
+   */
+  async function runPayout(key: string, action: (activeToken: string) => Promise<string>) {
+    if (!token) return;
+    setPayoutBusy(key);
+    setPayoutProblem(null);
+    setPayoutMessage(null);
+    try {
+      const note = await action(token);
+      setPayoutMessage(note);
+      setPayoutExecutionEnabled(true);
+      await reload();
+    } catch (caught) {
+      const described = describeApiError(caught);
+      setPayoutProblem(described);
+      if (described.code === "PAYOUT_EXECUTION_DISABLED") {
+        setPayoutExecutionEnabled(false);
+      }
+    } finally {
+      setPayoutBusy(null);
+    }
+  }
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isValidator = user?.role === "VALIDATOR";
   const isPayoutOfficer = user?.role === "PAYOUT_OFFICER";
@@ -141,9 +183,9 @@ export default function AdminPreElectionPage() {
   }
 
   useEffect(() => {
-    const authToken = localStorage.getItem("picsNigeriaAdminToken");
+    const authToken = readSession();
     if (!authToken) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
     loadPage(authToken)
@@ -263,7 +305,7 @@ export default function AdminPreElectionPage() {
         <section className="panel card">
           <h1>Unable to load pre-election workspace</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
@@ -279,7 +321,7 @@ export default function AdminPreElectionPage() {
         </p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {message ? <p className="feedback-banner success">{message}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
@@ -478,26 +520,157 @@ export default function AdminPreElectionPage() {
             </select>
           </div>
           <button className="button secondary" type="button" onClick={() => void reload()}>Refresh payouts</button>
-          <div className="reward-list" style={{ marginTop: 16 }}>
-            {(isPayoutOfficer ? payoutAssignments : payoutBatches.flatMap((batch) => batch.assignments)).slice(0, 20).map((assignment) => (
-              <article key={assignment.id} className="reward-item">
-                <strong>{assignment.beneficiaryName || assignment.beneficiaryUserId}</strong>
-                <p>{assignment.status} | {assignment.points} points | NGN {assignment.amount}</p>
-                <div className="action-row">
-                  <button className="button secondary" type="button" onClick={() => token && updatePreElectionPayoutAssignment(token, assignment.id, { status: "PROCESSING" }).then(() => reload())}>Processing</button>
-                  <button className="button" type="button" onClick={() => token && updatePreElectionPayoutAssignment(token, assignment.id, { status: "PAID", paymentReference: `PO-${assignment.id.slice(0, 8)}-${Date.now()}` }).then(() => reload())}>Mark paid</button>
-                  <button className="button secondary" type="button" onClick={() => token && updatePreElectionPayoutAssignment(token, assignment.id, { status: "HELD", note: "Held for review." }).then(() => reload())}>Hold</button>
-                </div>
-              </article>
-            ))}
+          {payoutExecutionEnabled === false ? (
+            <div style={{ marginTop: 12 }}>
+              <Notice tone="refused" title="Payout execution is disabled">
+                <span>
+                  No payment can complete while PAYOUT_EXECUTION_ENABLED is false. This is the default in every
+                  environment, production included, and is cleared only by a deliberate operator action.
+                </span>
+              </Notice>
+            </div>
+          ) : null}
+          {payoutMessage ? (
+            <div style={{ marginTop: 12 }}>
+              <Notice tone="ok" title={payoutMessage} />
+            </div>
+          ) : null}
+          {payoutProblem ? (
+            <div style={{ marginTop: 12 }}>
+              <Notice tone={payoutProblem.refused ? "refused" : "error"} title={payoutProblem.title}>
+                <span>{payoutProblem.detail}</span>
+                {payoutProblem.nextStep ? <span className="muted-text">{payoutProblem.nextStep}</span> : null}
+              </Notice>
+            </div>
+          ) : null}
+          <div style={{ marginTop: 16 }}>
+            <DataTable
+              head={
+                <tr>
+                  <th>Beneficiary</th>
+                  <th className="numeric">Points</th>
+                  <th className="numeric">Amount</th>
+                  <th>Status</th>
+                  <th>Payment reference</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {(isPayoutOfficer ? payoutAssignments : payoutBatches.flatMap((batch) => batch.assignments))
+                .slice(0, 50)
+                .map((assignment) => {
+                  const execution = assignment.transactions?.[0];
+                  return (
+                    <tr key={assignment.id}>
+                      <td>{assignment.beneficiaryName || assignment.beneficiaryUserId}</td>
+                      <td className="numeric">{formatCount(assignment.points)}</td>
+                      <td className="numeric">{formatMoney(assignment.amount)}</td>
+                      <td>
+                        <StatusPill status={assignment.status} />
+                      </td>
+                      <td className="muted-text">
+                        {/* The proof a payment happened. It was fetched on every load and rendered nowhere. */}
+                        {execution ? execution.paymentReference : "—"}
+                      </td>
+                      <td className="actions">
+                        {assignment.status === "PAID" ? (
+                          <span className="muted-text">Executed</span>
+                        ) : (
+                          <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              disabled={payoutBusy !== null}
+                              onClick={() =>
+                                void runPayout(`processing-${assignment.id}`, async (activeToken) => {
+                                  await updatePreElectionPayoutAssignment(activeToken, assignment.id, { status: "PROCESSING" });
+                                  return "Assignment moved to processing.";
+                                })
+                              }
+                            >
+                              Processing
+                            </button>
+                            <button
+                              className="btn btn-sm btn-primary"
+                              type="button"
+                              disabled={payoutBusy !== null || payoutExecutionEnabled === false}
+                              title={
+                                payoutExecutionEnabled === false
+                                  ? "Payout execution is disabled — this would be refused"
+                                  : undefined
+                              }
+                              onClick={() => setPayingAssignment(assignment)}
+                            >
+                              Mark paid…
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              disabled={payoutBusy !== null}
+                              onClick={() =>
+                                void runPayout(`hold-${assignment.id}`, async (activeToken) => {
+                                  await updatePreElectionPayoutAssignment(activeToken, assignment.id, {
+                                    status: "HELD",
+                                    note: "Held for review.",
+                                  });
+                                  return "Assignment held for review.";
+                                })
+                              }
+                            >
+                              Hold
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </DataTable>
           </div>
+
+          <PaymentReferenceDialog
+            open={payingAssignment !== null}
+            busy={payoutBusy !== null}
+            title="Record payout payment"
+            summary={
+              payingAssignment ? (
+                <>
+                  {payingAssignment.beneficiaryName || payingAssignment.beneficiaryUserId} ·{" "}
+                  {formatCount(payingAssignment.points)} points · {formatMoney(payingAssignment.amount)}. The reference
+                  is written to an immutable execution record and may identify only this payment.
+                </>
+              ) : null
+            }
+            onCancel={() => setPayingAssignment(null)}
+            onConfirm={(input) => {
+              const target = payingAssignment;
+              if (!target) return;
+              void runPayout(`paid-${target.id}`, async (activeToken) => {
+                await updatePreElectionPayoutAssignment(activeToken, target.id, { status: "PAID", ...input });
+                setPayingAssignment(null);
+                return "Payment recorded.";
+              });
+            }}
+          />
           {isSuperAdmin ? (
             <div className="reward-list" style={{ marginTop: 16 }}>
               {payoutBatches.map((batch) => (
                 <article key={batch.id} className="reward-item">
                   <strong>{batch.payoutCycleName || batch.payoutCycleId}</strong>
                   <p>{batch.status} | {batch.assignmentCount} assignments | NGN {batch.totalAmount}</p>
-                  <button className="button secondary" type="button" onClick={() => token && approvePreElectionPayoutBatch(token, batch.id).then(() => reload())}>Approve batch</button>
+                  <button
+                    className="btn btn-sm"
+                    type="button"
+                    disabled={payoutBusy !== null}
+                    onClick={() =>
+                      void runPayout(`batch-${batch.id}`, async (activeToken) => {
+                        await approvePreElectionPayoutBatch(activeToken, batch.id);
+                        return "Batch approved.";
+                      })
+                    }
+                  >
+                    Approve batch
+                  </button>
                 </article>
               ))}
             </div>

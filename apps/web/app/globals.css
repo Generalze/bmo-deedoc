@@ -2,24 +2,19 @@
 
 :root {
   color-scheme: light;
-  --flag-green: #0a8f4d;
+  /* Colour, type, spacing, radius, elevation and motion all live in
+     tokens.css. This block previously redefined eleven of those names, and
+     because it loads afterwards it silently won every one — the scales existed
+     but nothing outside the console screens actually used them.
+
+     What remains are the few surface names the older screens still paint with
+     and the token layer does not model. They are expressed in terms of the
+     tokens rather than as independent colours, so there is one palette. */
   --flag-white: #f7fbf8;
-  --navy: #12314b;
-  --navy-soft: #1d4464;
-  --bg: #eef3f1;
-  --bg-deep: #e2ebe7;
-  --panel: rgba(249, 252, 250, 0.9);
-  --panel-strong: #ffffff;
-  --panel-tint: rgba(235, 244, 239, 0.82);
-  --text: #122435;
-  --muted: #5d6f7a;
-  --line: rgba(18, 49, 75, 0.12);
-  --line-strong: rgba(18, 49, 75, 0.18);
-  --accent: #0c6b4f;
-  --accent-2: #1d4464;
+  --panel: var(--surface);
+  --panel-strong: var(--surface-raised);
+  --panel-tint: var(--surface-sunken);
   --accent-3: #9f2f2d;
-  --danger: #a12828;
-  --shadow: 0 18px 50px rgba(18, 49, 75, 0.1);
 }
 
 * {
@@ -33,12 +28,14 @@ body {
   min-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  background:
-    radial-gradient(circle at top left, rgba(18, 49, 75, 0.1), transparent 24%),
-    radial-gradient(circle at top right, rgba(10, 143, 77, 0.12), transparent 22%),
-    linear-gradient(180deg, #f5f9f7 0%, var(--bg) 38%, var(--bg-deep) 100%);
+  /* A flat ground. The two radial washes and the vertical gradient were the
+     other half of the glassmorphic look: they tint every surface placed on top,
+     which is why panels needed translucency and shadow to separate from the
+     page at all. A console reads better when the page is quiet and the data
+     carries the contrast. */
+  background: var(--bg);
   color: var(--text);
-  font-family: "Palatino Linotype", "Book Antiqua", Baskerville, Georgia, serif;
+  font-family: var(--font-sans);
 }
 
 body {
@@ -47,17 +44,11 @@ body {
   isolation: isolate;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    linear-gradient(130deg, rgba(255, 255, 255, 0.28), transparent 42%),
-    repeating-linear-gradient(90deg, rgba(18, 49, 75, 0.024) 0, rgba(18, 49, 75, 0.024) 1px, transparent 1px, transparent 36px);
-  opacity: 0.45;
-}
+/* The decorative overlay is gone: a diagonal white wash plus a repeating
+   vertical hairline grid sat over every page at 45% opacity, which is texture
+   for its own sake and reduces contrast on data. The flag band below stays —
+   it identifies the platform rather than decorating it. */
+
 
 body::after {
   content: "";
@@ -69,7 +60,7 @@ body::after {
   z-index: 20;
   pointer-events: none;
   background: linear-gradient(90deg, var(--flag-green) 0 33.33%, var(--flag-white) 33.33% 66.66%, var(--flag-green) 66.66% 100%);
-  box-shadow: 0 1px 0 rgba(11, 143, 71, 0.14);
+  box-shadow: var(--e-1);
 }
 
 a {
@@ -99,7 +90,7 @@ textarea {
   position: absolute;
   inset: 10px 8px 0;
   z-index: -1;
-  border-radius: 28px;
+  border-radius: var(--r-lg);
   background:
     linear-gradient(180deg, rgba(18, 49, 75, 0.08), rgba(247, 251, 248, 0.02) 34%, rgba(10, 143, 77, 0.07)),
     linear-gradient(90deg, rgba(18, 49, 75, 0.08) 0 33.33%, rgba(255, 255, 255, 0.08) 33.33% 66.66%, rgba(10, 143, 77, 0.08) 66.66% 100%);
@@ -111,8 +102,8 @@ textarea {
   background: var(--panel);
   backdrop-filter: blur(12px);
   border: 1px solid var(--line);
-  border-radius: 24px;
-  box-shadow: var(--shadow);
+  border-radius: var(--r-lg);
+  box-shadow: var(--e-2);
 }
 
 .hero,
@@ -150,17 +141,17 @@ textarea {
   right: 18px;
   width: 52px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   border: 1px solid rgba(11, 143, 71, 0.15);
   background: linear-gradient(90deg, var(--flag-green) 0 33.33%, var(--flag-white) 33.33% 66.66%, var(--flag-green) 66.66% 100%);
-  box-shadow: 0 10px 24px rgba(12, 107, 79, 0.14);
+  box-shadow: var(--e-2);
 }
 
 .hero h1,
 .card h2 {
   margin: 0 0 10px;
   letter-spacing: -0.03em;
-  font-family: "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  font-family: var(--font-sans);
 }
 
 .muted,
@@ -172,7 +163,7 @@ textarea {
 .feedback-banner {
   margin: 0 0 16px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--line);
   background: rgba(252, 255, 253, 0.9);
 }
@@ -205,10 +196,10 @@ textarea {
 .dialog-card {
   width: min(100%, 420px);
   padding: 24px;
-  border-radius: 20px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--line-strong);
   background: var(--panel-strong);
-  box-shadow: var(--shadow);
+  box-shadow: var(--e-2);
 }
 
 .grid {
@@ -252,7 +243,7 @@ textarea {
 .field textarea {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.96);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
@@ -264,25 +255,25 @@ textarea {
 .field textarea:focus {
   outline: none;
   border-color: rgba(18, 49, 75, 0.3);
-  box-shadow: 0 0 0 4px rgba(18, 49, 75, 0.1);
+  box-shadow: var(--e-1);
   transform: translateY(-1px);
 }
 
 .button {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 12px 16px;
   background: linear-gradient(135deg, var(--navy), var(--accent));
   color: #fff;
   cursor: pointer;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(18, 49, 75, 0.2);
+  box-shadow: var(--e-2);
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 .button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(18, 49, 75, 0.24);
+  box-shadow: var(--e-3);
 }
 
 .button:disabled {
@@ -292,7 +283,7 @@ textarea {
 
 .secondary {
   background: linear-gradient(135deg, #456279, var(--navy-soft));
-  box-shadow: 0 10px 24px rgba(18, 49, 75, 0.18);
+  box-shadow: var(--e-2);
 }
 
 .link-button {
@@ -300,18 +291,18 @@ textarea {
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 12px 18px;
   background: linear-gradient(135deg, var(--flag-green), var(--accent));
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(12, 107, 79, 0.2);
+  box-shadow: var(--e-2);
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 .link-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(12, 107, 79, 0.24);
+  box-shadow: var(--e-3);
 }
 
 .link-button.secondary {
@@ -330,7 +321,7 @@ textarea {
 
 .button.danger {
   background: linear-gradient(135deg, var(--danger), #c94b4b);
-  box-shadow: 0 10px 24px rgba(161, 40, 40, 0.22);
+  box-shadow: var(--e-2);
 }
 
 .error {
@@ -338,7 +329,7 @@ textarea {
   background: rgba(161, 40, 40, 0.08);
   border: 1px solid rgba(161, 40, 40, 0.16);
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
 }
 
 .reward-list {
@@ -348,7 +339,7 @@ textarea {
 
 .reward-item {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   padding: 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 247, 243, 0.96));
@@ -393,10 +384,10 @@ textarea {
   gap: 6px;
   min-width: 92px;
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(18, 49, 75, 0.08);
   color: var(--navy);
-  font-size: 0.82rem;
+  font-size: var(--fs-200);
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -424,7 +415,7 @@ textarea {
 }
 
 .management-card strong {
-  font-size: 1.05rem;
+  font-size: var(--fs-400);
 }
 
 .map-filter-row {
@@ -435,7 +426,7 @@ textarea {
 
 .map-filter-row select {
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.96);
 }
@@ -456,7 +447,7 @@ textarea {
   min-height: 420px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: var(--r-lg);
   background:
     radial-gradient(circle at 20% 20%, rgba(18, 49, 75, 0.14), transparent 18%),
     radial-gradient(circle at 80% 24%, rgba(10, 143, 77, 0.12), transparent 16%),
@@ -490,7 +481,7 @@ textarea {
 .google-live-map-canvas {
   min-height: 420px;
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   background: linear-gradient(160deg, rgba(250, 253, 251, 0.98), rgba(230, 239, 235, 0.98));
 }
@@ -517,10 +508,10 @@ textarea {
   bottom: 12px;
   z-index: 2;
   padding: 6px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(244, 249, 246, 0.92);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--fs-200);
   border: 1px solid rgba(17, 61, 43, 0.12);
 }
 
@@ -540,7 +531,7 @@ textarea {
   margin-left: -9px;
   margin-top: -9px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease;
   z-index: 2;
@@ -548,12 +539,12 @@ textarea {
 
 .map-marker.incident {
   background: var(--accent-3);
-  box-shadow: 0 0 0 6px rgba(159, 47, 45, 0.18);
+  box-shadow: var(--e-1);
 }
 
 .map-marker.agent {
   background: var(--accent);
-  box-shadow: 0 0 0 6px rgba(12, 107, 79, 0.16);
+  box-shadow: var(--e-1);
 }
 
 .map-marker.selected {
@@ -573,7 +564,7 @@ textarea {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: var(--fs-300);
 }
 
 .legend-dot {
@@ -602,7 +593,7 @@ textarea {
   display: grid;
   gap: 4px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   padding: 14px;
   background: rgba(255, 255, 255, 0.88);
   text-align: left;
@@ -660,7 +651,7 @@ textarea {
   gap: 8px;
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   padding: 14px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 246, 242, 0.94));
@@ -674,13 +665,13 @@ textarea {
 .operation-unit.selected {
   transform: translateY(-2px);
   border-color: rgba(12, 107, 79, 0.35);
-  box-shadow: 0 16px 32px rgba(18, 49, 75, 0.12);
+  box-shadow: var(--e-3);
 }
 
 .webrtc-card {
   margin-top: 16px;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   border: 1px dashed rgba(18, 49, 75, 0.24);
   background: rgba(18, 49, 75, 0.05);
 }
@@ -708,7 +699,7 @@ textarea {
   display: grid;
   gap: 4px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   padding: 12px;
   background: rgba(255, 255, 255, 0.88);
   color: var(--text);
@@ -723,7 +714,7 @@ textarea {
 
 .conversation-button span {
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: var(--fs-300);
 }
 
 .message-pane {
@@ -737,21 +728,21 @@ textarea {
   max-height: 420px;
   overflow: auto;
   padding: 12px;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   background: rgba(18, 49, 75, 0.05);
 }
 
 .message-bubble {
   max-width: 78%;
   padding: 12px;
-  border-radius: 16px 16px 16px 4px;
+  border-radius: var(--r-lg) 16px 16px 4px;
   background: #fff;
   border: 1px solid var(--line);
 }
 
 .message-bubble.own {
   justify-self: end;
-  border-radius: 16px 16px 4px 16px;
+  border-radius: var(--r-lg) 16px 4px 16px;
   background: rgba(12, 107, 79, 0.12);
 }
 
@@ -761,7 +752,7 @@ textarea {
 
 .message-bubble span {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--fs-100);
 }
 
 .message-form {
@@ -772,7 +763,7 @@ textarea {
 
 .message-form input {
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 12px 14px;
 }
 
@@ -785,7 +776,7 @@ textarea {
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 10px;
   padding: 12px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: rgba(255, 255, 255, 0.84);
   border: 1px solid var(--line);
 }
@@ -794,14 +785,14 @@ textarea {
   width: 12px;
   height: 12px;
   margin-top: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--accent);
-  box-shadow: 0 0 0 5px rgba(12, 107, 79, 0.12);
+  box-shadow: var(--e-1);
 }
 
 .timeline-dot.critical {
   background: var(--danger);
-  box-shadow: 0 0 0 5px rgba(161, 40, 40, 0.12);
+  box-shadow: var(--e-1);
 }
 
 .admin-nav {
@@ -818,7 +809,7 @@ textarea {
 
 .admin-nav__title {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-100);
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -846,10 +837,10 @@ textarea {
 .candidate-portrait {
   width: 104px;
   height: 104px;
-  border-radius: 28px;
+  border-radius: var(--r-lg);
   object-fit: cover;
   border: 3px solid rgba(18, 49, 75, 0.12);
-  box-shadow: 0 20px 36px rgba(18, 49, 75, 0.12);
+  box-shadow: var(--e-3);
 }
 
 .candidate-portrait.fallback,
@@ -863,7 +854,7 @@ textarea {
 }
 
 .candidate-office {
-  font-size: 1.05rem;
+  font-size: var(--fs-400);
   font-weight: 600;
 }
 
@@ -878,8 +869,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 0.82rem;
+  border-radius: var(--r-full);
+  font-size: var(--fs-200);
   font-weight: 700;
 }
 
@@ -923,7 +914,7 @@ textarea {
   display: grid;
   gap: 14px;
   padding: 16px;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.9);
 }
@@ -967,7 +958,7 @@ textarea {
 .campaign-material-preview {
   width: 100%;
   min-height: 220px;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   object-fit: cover;
   background: rgba(18, 49, 75, 0.05);
 }
@@ -989,7 +980,7 @@ textarea {
   gap: 6px;
   min-width: 180px;
   padding: 18px;
-  border-radius: 22px;
+  border-radius: var(--r-lg);
   background:
     linear-gradient(135deg, rgba(18, 49, 75, 0.14), rgba(255, 255, 255, 0.94)),
     repeating-linear-gradient(135deg, rgba(10, 143, 77, 0.06) 0 12px, rgba(255, 255, 255, 0.08) 12px 24px);
@@ -997,7 +988,7 @@ textarea {
 }
 
 .hero-callout strong {
-  font-size: 2.2rem;
+  font-size: var(--fs-700);
   line-height: 1;
 }
 
@@ -1015,10 +1006,10 @@ textarea {
   display: grid;
   gap: 0;
   overflow: hidden;
-  border-radius: 22px;
+  border-radius: var(--r-lg);
   border: 1px solid rgba(18, 49, 75, 0.1);
   background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 20px 40px rgba(18, 49, 75, 0.08);
+  box-shadow: var(--e-3);
 }
 
 .campaign-event-cover {
@@ -1038,13 +1029,13 @@ textarea {
 
 .candidate-card {
   border: 1px solid rgba(18, 49, 75, 0.1);
-  box-shadow: 0 18px 38px rgba(18, 49, 75, 0.08);
+  box-shadow: var(--e-3);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
 .candidate-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 26px 46px rgba(18, 49, 75, 0.12);
+  box-shadow: var(--e-3);
 }
 
 .candidate-discovery-hero,
@@ -1064,7 +1055,7 @@ textarea {
   inset: auto -12% -28% auto;
   width: 220px;
   height: 220px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: radial-gradient(circle, rgba(18, 49, 75, 0.1), transparent 68%);
   pointer-events: none;
 }
@@ -1077,7 +1068,7 @@ textarea {
 }
 
 .value.small {
-  font-size: 1.8rem;
+  font-size: var(--fs-600);
 }
 
 .empty-state {
@@ -1154,7 +1145,7 @@ textarea {
   min-height: 100vh;
   background: hsl(140 10% 96%);
   color: hsl(150 25% 10%);
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .starter-page__bar {
@@ -1178,16 +1169,16 @@ textarea {
 
 .starter-page__brand h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--fs-500);
   font-weight: 800;
   letter-spacing: -0.03em;
   color: hsl(150 25% 10%);
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .starter-page__brand p {
   margin: 0.25rem 0 0;
-  font-size: 0.95rem;
+  font-size: var(--fs-400);
   color: hsl(150 10% 46%);
 }
 
@@ -1203,7 +1194,7 @@ textarea {
   height: 1.5rem;
   border-radius: 0.125rem;
   overflow: hidden;
-  box-shadow: 0 0 0 1px rgba(0, 60, 30, 0.08);
+  box-shadow: var(--e-1);
 }
 
 .starter-auth-card,
@@ -1230,11 +1221,11 @@ textarea {
 
 .starter-auth-card__header h2 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: var(--fs-400);
   font-weight: 700;
   letter-spacing: -0.03em;
   color: hsl(150 25% 10%);
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .starter-auth-card__header p,
@@ -1243,7 +1234,7 @@ textarea {
 .starter-page__footer,
 .starter-form__meta {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-100);
   color: hsl(150 10% 46%);
 }
 
@@ -1260,7 +1251,7 @@ textarea {
 .starter-form__field span,
 .starter-access-card span,
 .starter-polling-card span {
-  font-size: 0.9rem;
+  font-size: var(--fs-300);
   font-weight: 600;
   letter-spacing: -0.02em;
   color: hsl(150 25% 10%);
@@ -1311,10 +1302,10 @@ textarea {
   border-radius: 0.75rem;
   background: hsl(153 60% 28%);
   color: #fff;
-  font-size: 0.92rem;
+  font-size: var(--fs-300);
   font-weight: 700;
   letter-spacing: -0.02em;
-  box-shadow: 0 1px 2px rgba(0, 60, 30, 0.12), 0 4px 12px -2px rgba(0, 60, 30, 0.1);
+  box-shadow: var(--e-2);
 }
 
 .starter-form__submit:hover,
@@ -1336,7 +1327,7 @@ textarea {
 
 .starter-form__note {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-200);
   color: hsl(150 10% 46%);
 }
 
@@ -1373,7 +1364,7 @@ textarea {
 .starter-access__label {
   margin: 0;
   padding: 0 0.25rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-100);
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -1420,7 +1411,7 @@ textarea {
   border-radius: 0.75rem;
   background: hsl(153 60% 28% / 0.1);
   color: hsl(153 60% 28%);
-  font-size: 1rem;
+  font-size: var(--fs-400);
   font-weight: 800;
 }
 
@@ -1443,15 +1434,15 @@ textarea {
 
 .starter-results__head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--fs-400);
   font-weight: 700;
   color: hsl(150 25% 10%);
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .starter-results__head p {
   margin: 0.25rem 0 0;
-  font-size: 0.8rem;
+  font-size: var(--fs-200);
   color: hsl(150 10% 46%);
 }
 
@@ -1462,10 +1453,10 @@ textarea {
   min-width: 6.25rem;
   min-height: 2.2rem;
   padding: 0.25rem 0.85rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: hsl(153 60% 28% / 0.1);
   color: hsl(153 60% 28%);
-  font-size: 0.8rem;
+  font-size: var(--fs-200);
   font-weight: 800;
 }
 
@@ -1491,14 +1482,14 @@ textarea {
 
 .starter-results__item p {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-200);
   color: hsl(150 10% 46%);
 }
 
 .starter-page__footer {
   padding-top: 0.5rem;
   text-align: center;
-  font-size: 0.7rem;
+  font-size: var(--fs-100);
 }
 
 @media (max-width: 640px) {
@@ -1519,13 +1510,13 @@ textarea {
 .command-header {
   border-left: 6px solid #334155;
   background: #ffffff;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.25rem;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--e-1);
 }
 .command-breadcrumb {
-  font-size: 0.85rem;
+  font-size: var(--fs-300);
   margin-bottom: 0.5rem;
   color: #475569;
 }
@@ -1535,19 +1526,19 @@ textarea {
   padding: 0;
   color: #1d4ed8;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--fs-300);
   text-decoration: underline;
 }
 .command-eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.75rem;
+  font-size: var(--fs-100);
   font-weight: 700;
   margin: 0;
 }
 .command-title {
   margin: 0.15rem 0 0.35rem;
-  font-size: 1.75rem;
+  font-size: var(--fs-600);
 }
 .command-summary {
   margin: 0 0 1rem;
@@ -1561,16 +1552,16 @@ textarea {
 }
 .command-score {
   color: #ffffff;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 0.6rem 1rem;
   display: flex;
   align-items: baseline;
   gap: 0.25rem;
 }
-.command-score-value { font-size: 1.8rem; font-weight: 700; }
-.command-score-unit { font-size: 0.85rem; opacity: 0.85; }
+.command-score-value { font-size: var(--fs-600); font-weight: 700; }
+.command-score-unit { font-size: var(--fs-300); opacity: 0.85; }
 .command-band { margin: 0; font-weight: 700; }
-.command-trend { margin: 0; color: #64748b; font-size: 0.85rem; }
+.command-trend { margin: 0; color: #64748b; font-size: var(--fs-300); }
 
 .command-tiles {
   display: grid;
@@ -1581,18 +1572,18 @@ textarea {
 .command-tile {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 0.85rem 1rem;
 }
-.command-tile-label { margin: 0; font-size: 0.8rem; color: #64748b; }
-.command-tile-value { margin: 0.2rem 0; font-size: 1.5rem; font-weight: 700; }
-.command-tile-target { margin: 0; font-size: 0.78rem; color: #475569; }
+.command-tile-label { margin: 0; font-size: var(--fs-200); color: #64748b; }
+.command-tile-value { margin: 0.2rem 0; font-size: var(--fs-500); font-weight: 700; }
+.command-tile-target { margin: 0; font-size: var(--fs-100); color: #475569; }
 .command-tile-muted { color: #94a3b8; }
 
 .command-section {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   padding: 1rem 1.25rem;
   margin-bottom: 1.25rem;
 }
@@ -1603,7 +1594,7 @@ textarea {
   justify-content: space-between;
   gap: 0.75rem;
 }
-.command-section h2 { margin: 0; font-size: 1.1rem; }
+.command-section h2 { margin: 0; font-size: var(--fs-400); }
 .command-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1611,11 +1602,11 @@ textarea {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-100);
   color: #475569;
 }
 .command-legend li { display: flex; align-items: center; gap: 0.35rem; }
-.command-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.command-swatch { width: 12px; height: 12px; border-radius: var(--r-sm); display: inline-block; }
 
 .command-heatmap {
   display: grid;
@@ -1625,7 +1616,7 @@ textarea {
 }
 .command-heat-cell {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: #ffffff;
   cursor: pointer;
   padding: 0.75rem;
@@ -1635,11 +1626,11 @@ textarea {
   gap: 0.35rem;
   min-height: 76px;
 }
-.command-heat-name { font-size: 0.82rem; font-weight: 600; line-height: 1.2; }
-.command-heat-score { font-size: 1.35rem; font-weight: 700; }
+.command-heat-name { font-size: var(--fs-200); font-weight: 600; line-height: 1.2; }
+.command-heat-score { font-size: var(--fs-500); font-weight: 700; }
 
 .command-table-wrap { overflow-x: auto; }
-.command-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.command-table { width: 100%; border-collapse: collapse; font-size: var(--fs-300); }
 .command-table th, .command-table td {
   text-align: left;
   padding: 0.5rem 0.6rem;
@@ -1648,18 +1639,18 @@ textarea {
 }
 .command-pill {
   color: #ffffff;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 0.15rem 0.6rem;
-  font-size: 0.78rem;
+  font-size: var(--fs-100);
 }
 .command-drill {
   background: #1d4ed8;
   color: #ffffff;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 0.3rem 0.7rem;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: var(--fs-200);
 }
 .command-detail {
   display: grid;
@@ -1667,7 +1658,7 @@ textarea {
   gap: 0.75rem;
   margin: 0.75rem 0 0;
 }
-.command-detail dt { font-size: 0.78rem; color: #64748b; }
+.command-detail dt { font-size: var(--fs-100); color: #64748b; }
 .command-detail dd { margin: 0.15rem 0 0; font-weight: 600; }
 
 .command-leaderboard { list-style: none; margin: 0.75rem 0 0; padding: 0; }
@@ -1681,34 +1672,34 @@ textarea {
 }
 .command-rank { font-weight: 700; color: #64748b; }
 .command-leader-name { font-weight: 600; }
-.command-leader-level { font-size: 0.78rem; color: #64748b; }
-.command-leader-value { font-size: 0.85rem; font-weight: 600; }
-.command-metric-select { font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
-.command-note { font-size: 0.78rem; color: #64748b; margin: 0.4rem 0 0; }
+.command-leader-level { font-size: var(--fs-100); color: #64748b; }
+.command-leader-value { font-size: var(--fs-300); font-weight: 600; }
+.command-metric-select { font-size: var(--fs-300); display: flex; gap: 0.4rem; align-items: center; }
+.command-note { font-size: var(--fs-100); color: #64748b; margin: 0.4rem 0 0; }
 .command-empty { color: #64748b; font-style: italic; }
-.command-generated { font-size: 0.78rem; color: #64748b; }
+.command-generated { font-size: var(--fs-100); color: #64748b; }
 
 /* Election Day voice calling (Feature 111) */
 .call-panel {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   padding: 1rem 1.25rem;
 }
 .call-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
-.call-panel-head h2 { margin: 0; font-size: 1.1rem; }
-.call-recording-note { font-size: 0.75rem; color: #15803d; font-weight: 600; }
-.call-error { color: #b91c1c; font-size: 0.85rem; }
-.call-warning { color: #b45309; font-size: 0.82rem; }
+.call-panel-head h2 { margin: 0; font-size: var(--fs-400); }
+.call-recording-note { font-size: var(--fs-100); color: #15803d; font-weight: 600; }
+.call-error { color: #b91c1c; font-size: var(--fs-300); }
+.call-warning { color: #b45309; font-size: var(--fs-200); }
 .call-start { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-top: 0.75rem; }
-.call-select { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+.call-select { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-300); }
 .call-start-button, .call-accept, .call-decline, .call-end {
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 0.45rem 0.9rem;
   cursor: pointer;
   color: #ffffff;
-  font-size: 0.85rem;
+  font-size: var(--fs-300);
 }
 .call-start-button, .call-accept { background: #15803d; }
 .call-decline, .call-end { background: #b91c1c; }
@@ -1720,7 +1711,7 @@ textarea {
 .call-active-status { margin: 0; font-weight: 700; }
 .call-active-party { margin: 0.15rem 0 0.6rem; color: #475569; }
 .call-actions { display: flex; gap: 0.5rem; }
-.call-history-title { font-size: 0.95rem; margin: 1rem 0 0.4rem; }
+.call-history-title { font-size: var(--fs-400); margin: 1rem 0 0.4rem; }
 .call-history { list-style: none; margin: 0; padding: 0; }
 .call-history li {
   display: grid;
@@ -1729,11 +1720,11 @@ textarea {
   align-items: center;
   padding: 0.35rem 0;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 0.85rem;
+  font-size: var(--fs-300);
 }
 .call-status { font-weight: 600; }
 .call-status-missed, .call-status-rejected { color: #b91c1c; }
 .call-status-completed { color: #15803d; }
 .call-status-connected, .call-status-ringing { color: #1d4ed8; }
-.call-history-meta { color: #64748b; font-size: 0.78rem; }
+.call-history-meta { color: #64748b; font-size: var(--fs-100); }
 .call-empty { color: #64748b; font-style: italic; }

@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile } from "@pics-nigeria/shared";
 import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, logoutCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminAccountPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -24,9 +25,9 @@ export default function AdminAccountPage() {
   });
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -44,7 +45,11 @@ export default function AdminAccountPage() {
         });
       })
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAdminToken");
+        // Only a real authentication failure clears the session. A 403 means this
+        // screen is above the operator's role, not that they are signed out.
+        if (caughtError instanceof ApiError && caughtError.status === 401) {
+          clearSession();
+        }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load account settings.");
       })
       .finally(() => setLoading(false));
@@ -52,7 +57,7 @@ export default function AdminAccountPage() {
 
   async function handleProfileSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -76,7 +81,7 @@ export default function AdminAccountPage() {
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -106,7 +111,7 @@ export default function AdminAccountPage() {
   }
 
   async function handleExportContacts() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -132,7 +137,7 @@ export default function AdminAccountPage() {
   }
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -141,8 +146,8 @@ export default function AdminAccountPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAdminToken");
-    window.location.href = "/admin/login";
+    clearSession();
+    window.location.href = "/login";
   }
 
   if (loading) {
@@ -161,7 +166,7 @@ export default function AdminAccountPage() {
         <section className="panel card">
           <h1>Unable to load account</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
@@ -180,7 +185,7 @@ export default function AdminAccountPage() {
         </div>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}

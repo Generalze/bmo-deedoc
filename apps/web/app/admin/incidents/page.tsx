@@ -11,6 +11,7 @@ import {
 import { ApiError, fetchAdminIncidentReview, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import { readSession } from "../../../lib/session";
 
 const statusOptions = ["", "OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
 const reviewPriorityOptions = ["", "ROUTINE", "PRIORITY", "CRITICAL"] as const;
@@ -53,9 +54,9 @@ export default function AdminIncidentsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -65,7 +66,7 @@ export default function AdminIncidentsPage() {
   }, []);
 
   async function handleApplyFilters() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -131,7 +132,7 @@ export default function AdminIncidentsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
 
       <section className="grid stats">

@@ -132,8 +132,20 @@ try {
   runNpm(["run", "prisma:ensure-production"], testEnv);
   resetToUntrackedBaseline(testEnv);
   runNpm(["run", "prisma:ensure-production"], testEnv);
-  runNpm(["run", "seed"], testEnv);
+  // Reference data first: the seed now attaches its sample accounts to the real
+  // Ogun structure rather than inventing territory inside it. Seeding first made
+  // the seed fabricate a senatorial district and a federal constituency that the
+  // reference import then duplicated, breaking Ogun's verified counts.
   runNpm(["run", "bootstrap:reference-data"], testEnv);
+  // Ogun's own structure — 20 LGAs, 236 wards, 5,042 polling units and the 26
+  // state constituencies with their command parents. bootstrap:reference-data
+  // stops at the national constituency set, so without this the state has no
+  // LGAs at all and the seed has nowhere legitimate to place a sample account.
+  runNpm(
+    ["run", "import:reference:ogun", "--", "--release-dir", "reference/ogun/ogun-identity-2026-08-12", "--apply"],
+    testEnv,
+  );
+  runNpm(["run", "seed"], testEnv);
   runNpm(["run", "verify:reference:ogun:allow-incomplete"], testEnv);
   runNpm(["run", "report:reference:ogun"], testEnv);
   runNpm(["test", "--workspace", "@pics-nigeria/api"], testEnv);

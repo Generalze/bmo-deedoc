@@ -84,10 +84,23 @@ export async function ensureNationalReferenceStates(prisma: PrismaClient) {
       continue;
     }
 
-    await prisma.geoPoliticalZone.create({
-      data: zone,
-    });
-    zoneIdByName.set(zone.name, zone.id);
+    // Read-then-create is not safe here: this runs from an unauthenticated
+    // endpoint that a page can call twice concurrently (a dev double-render is
+    // enough), and both callers then create the same id. The loser used to
+    // raise P2002 out of an async handler with no catch, which took the whole
+    // API process down. Resolve the race by re-reading instead of failing.
+    const created = await prisma.geoPoliticalZone
+      .create({ data: zone })
+      .catch(async (error: unknown) => {
+        if (isUniqueViolation(error)) {
+          return prisma.geoPoliticalZone.findFirst({
+            where: { OR: [{ id: zone.id }, { name: zone.name }] },
+            select: { id: true },
+          });
+        }
+        throw error;
+      });
+    zoneIdByName.set(zone.name, created?.id || zone.id);
   }
 
   for (const state of NIGERIA_STATE_REFERENCE) {
@@ -106,14 +119,29 @@ export async function ensureNationalReferenceStates(prisma: PrismaClient) {
       continue;
     }
 
-    await prisma.state.create({
-      data: {
-        id: state.id,
-        name: state.name,
-        geoPoliticalZoneId,
-      },
-    });
+    await prisma.state
+      .create({
+        data: {
+          id: state.id,
+          name: state.name,
+          geoPoliticalZoneId,
+        },
+      })
+      // Same race as the zones above: a concurrent caller may have created it
+      // between the read and the write. That is the expected outcome, not a
+      // failure, so the reference set still ends up complete.
+      .catch((error: unknown) => {
+        if (isUniqueViolation(error)) {
+          return null;
+        }
+        throw error;
+      });
   }
+}
+
+/** A Prisma unique-constraint violation, which here means "someone else won the race". */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
 
 export async function syncLgasForState(prisma: PrismaClient, stateId: string) {

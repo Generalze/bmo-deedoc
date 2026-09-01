@@ -1,4 +1,4 @@
-import type { CandidateOfficeType, TerritoryScope } from "@pics-nigeria/shared";
+import { OGUN_STATE_ID, type CandidateOfficeType, type TerritoryScope } from "@pics-nigeria/shared";
 import { prisma } from "../prisma";
 
 export type TerritoryValidationInput = TerritoryScope;
@@ -41,7 +41,48 @@ export function toScopeFilter(scope: TerritoryScope) {
   return filter;
 }
 
+/**
+ * The geo-political zone Ogun belongs to, resolved from reference data rather
+ * than hard-coded, and cached because it cannot change.
+ */
+let ogunZoneId: string | null | undefined;
+
+async function getOgunZoneId(): Promise<string | null> {
+  if (ogunZoneId === undefined) {
+    const ogun = await prisma.state.findUnique({
+      where: { id: OGUN_STATE_ID },
+      select: { geoPoliticalZoneId: true },
+    });
+    ogunZoneId = ogun?.geoPoliticalZoneId ?? null;
+  }
+  return ogunZoneId;
+}
+
+/**
+ * Feature 001: Ogun State and the territory beneath it, and nothing else.
+ *
+ * This is the one place a territory becomes legitimate, so it is where the
+ * restriction belongs. The checks below already require every descendant to
+ * belong to the named state, so pinning the state to Ogun makes the whole
+ * hierarchy transitively Ogun's — a Lagos ward cannot be smuggled in under an
+ * Ogun state id, and an Ogun ward cannot be attached to a Lagos state id.
+ *
+ * The national reference set still exists for reporting and INEC alignment
+ * (feature 004). What it no longer does is describe somewhere an operator, a
+ * candidate or a member can be placed.
+ */
 export async function validateTerritoryReferences(input: TerritoryValidationInput): Promise<string | null> {
+  if (input.stateId && input.stateId !== OGUN_STATE_ID) {
+    return "This platform operates in Ogun State only. Select a territory within Ogun State.";
+  }
+
+  if (input.geoPoliticalZoneId) {
+    const ogunZone = await getOgunZoneId();
+    if (ogunZone && input.geoPoliticalZoneId !== ogunZone) {
+      return "This platform operates in Ogun State only. Select a territory within Ogun State.";
+    }
+  }
+
   if (input.geoPoliticalZoneId) {
     const zone = await prisma.geoPoliticalZone.findUnique({
       where: { id: input.geoPoliticalZoneId },

@@ -33,6 +33,7 @@ import {
   submitMyPreElectionVerificationDocument,
 } from "../../lib/api";
 import type { PreElectionVerificationCase } from "../../lib/api";
+import { clearSession, readSession } from "../../lib/session";
 
 async function sha256File(file: File) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
@@ -56,6 +57,10 @@ export default function DashboardPage() {
     pendingPotentialPoints: number;
     reservedPayoutPoints: number;
     availablePoints: number;
+    legacyCarryoverPendingPoints: number;
+    legacyCarryoverConfirmedPoints: number;
+    preCutoverReservedPoints: number;
+    payablePoints: number;
   } | null>(null);
   const [verification, setVerification] = useState<PreElectionVerificationCase | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -135,7 +140,7 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
 
     if (!token) {
       window.location.href = "/login";
@@ -147,7 +152,7 @@ export default function DashboardPage() {
       try {
         await loadDashboard(authToken);
       } catch (caughtError) {
-        localStorage.removeItem("picsNigeriaToken");
+        clearSession();
         setError(caughtError instanceof Error ? caughtError.message : "Could not load your dashboard.");
       } finally {
         setLoading(false);
@@ -159,7 +164,7 @@ export default function DashboardPage() {
 
   async function handleRedemptionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -182,7 +187,7 @@ export default function DashboardPage() {
 
   async function handleVerificationDocumentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token || !verificationDocument) {
       setError("Authentication and a voter evidence file are required.");
       return;
@@ -219,7 +224,7 @@ export default function DashboardPage() {
   }
 
   async function handleClaimTask(taskId: string) {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -236,7 +241,7 @@ export default function DashboardPage() {
   }
 
   async function handleEventRsvp(eventId: string, status: "INTERESTED" | "GOING") {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -253,7 +258,7 @@ export default function DashboardPage() {
   }
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -262,7 +267,7 @@ export default function DashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaToken");
+    clearSession();
     window.location.href = "/login";
   }
 
@@ -277,7 +282,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error || !user || !rewards || !balance) {
+  if (!user || !rewards || !balance) {
     return (
       <main className="shell">
         <section className="panel card">
@@ -324,6 +329,12 @@ export default function DashboardPage() {
         <article className="panel card">
           <h2>Reserved Payout</h2>
           <div className="value">{preElectionBalance?.reservedPayoutPoints ?? balance.reservedPoints}</div>
+          {preElectionBalance?.preCutoverReservedPoints ? (
+            <p className="muted">
+              Includes {preElectionBalance.preCutoverReservedPoints} points claimed before the legacy cutover.
+              Those are held against your balance and are not payable until reconciliation is settled.
+            </p>
+          ) : null}
         </article>
         <article className="panel card">
           <h2>Available Balance</h2>

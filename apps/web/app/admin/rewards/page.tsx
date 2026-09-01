@@ -5,12 +5,28 @@ import { useEffect, useMemo, useState } from "react";
 import type { AuthUserProfile, RewardHistoryItem, RewardLedgerItem, RewardRedemptionItem } from "@pics-nigeria/shared";
 import {
   ApiError,
+  approveAdminRedemption,
   fetchAdminRedemptions,
   fetchAdminRewardLedger,
   fetchCurrentUser,
+  payAdminRedemption,
+  rejectAdminRedemption,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { PaymentReferenceDialog } from "../../../components/payment-reference-dialog";
+import {
+  DataTable,
+  Money,
+  Notice,
+  Panel,
+  StateView,
+  StatusPill,
+  formatCount,
+  formatMoney,
+} from "../../../components/ui";
+import { describeApiError, type DescribedError } from "../../../lib/api-errors";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import { readSession } from "../../../lib/session";
 
 function countByStatus(redemptions: RewardRedemptionItem[], status: RewardRedemptionItem["status"]) {
   return redemptions.filter((item) => item.status === status).length;
@@ -23,6 +39,34 @@ export default function AdminRewardsPage() {
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [paying, setPaying] = useState<RewardRedemptionItem | null>(null);
+  const [problem, setProblem] = useState<DescribedError | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  /**
+   * Every review action goes through here so a refusal is always surfaced.
+   * Previously none of these paths existed at all, and the payout buttons that
+   * did exist had no .catch — with payout execution disabled by default, the
+   * primary money button simply did nothing and said nothing.
+   */
+  async function act(key: string, run: (token: string) => Promise<string>) {
+    const token = readSession();
+    if (!token) return;
+    setBusy(key);
+    setProblem(null);
+    setMessage(null);
+    try {
+      const note = await run(token);
+      setMessage(note);
+      const refreshed = await fetchAdminRedemptions(token);
+      setRedemptions(refreshed);
+    } catch (caught) {
+      setProblem(describeApiError(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function loadPage(token: string) {
     const [currentUser, ledgerData, visibleRedemptions] = await Promise.all([
@@ -42,9 +86,9 @@ export default function AdminRewardsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -107,7 +151,7 @@ export default function AdminRewardsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
 
       <section className="grid stats">
@@ -128,8 +172,12 @@ export default function AdminRewardsPage() {
           <div className="value">{summary.rejected}</div>
         </article>
         <article className="panel card">
-          <h2>Posted points</h2>
+          <h2>Legacy posted points</h2>
           <div className="value">{summary.postedPoints}</div>
+          <p className="muted">
+            Historical total from the read-only legacy ledger. New earnings post to the authoritative ledger and are
+            not counted here.
+          </p>
         </article>
       </section>
 
@@ -137,7 +185,10 @@ export default function AdminRewardsPage() {
         <div className="section-head">
           <div>
             <h2>Visible reward history</h2>
-            <p className="muted">This list combines posted ledger entries with redemption review status inside your allowed scope.</p>
+            <p className="muted">
+              Legacy ledger entries and redemption review status inside your allowed scope. The legacy ledger is
+              read-only; it records history and is not the balance any payment is made from.
+            </p>
           </div>
           <span className="status-pill">{rewardHistory.length} entries</span>
         </div>
@@ -173,34 +224,118 @@ export default function AdminRewardsPage() {
         )}
       </section>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Redemption review queue</h2>
-            <p className="muted">Approval and payment actions continue to use the existing protected backend review flow.</p>
-          </div>
-          <span className="status-pill">{redemptions.length} requests</span>
-        </div>
+      {message ? <Notice tone="ok" title={message} /> : null}
+      {problem ? (
+        <Notice tone={problem.refused ? "refused" : "error"} title={problem.title}>
+          <span>{problem.detail}</span>
+          {problem.nextStep ? <span className="muted-text">{problem.nextStep}</span> : null}
+        </Notice>
+      ) : null}
 
+      <Panel
+        title="Redemption review queue"
+        meta={`${redemptions.length} requests`}
+        flush
+      >
         {redemptions.length === 0 ? (
-          <p className="muted">No redemption requests are currently visible in your scope.</p>
+          <StateView kind="empty" title="No redemption requests are visible in your scope" />
         ) : (
-          <div className="reward-list">
-            {redemptions.slice(0, 20).map((item) => (
-              <article key={item.id} className="reward-item">
-                <strong>{item.status}</strong>
-                <p>{item.pointsRequested} points requested</p>
-                {item.amountRequested !== null ? <p className="muted">Payable amount: {item.amountRequested}</p> : null}
-                <p className="muted">
-                  Submitted {new Date(item.createdAt).toLocaleString()}
-                  {item.reviewedAt ? ` | Reviewed ${new Date(item.reviewedAt).toLocaleString()}` : ""}
-                </p>
-                {item.note ? <p className="muted">Review note: {item.note}</p> : null}
-              </article>
+          <DataTable
+            head={
+              <tr>
+                <th>Submitted</th>
+                <th className="numeric">Points</th>
+                <th className="numeric">Payable amount</th>
+                <th>Status</th>
+                <th>Note</th>
+                <th className="actions">Review</th>
+              </tr>
+            }
+          >
+            {redemptions.slice(0, 50).map((item) => (
+              <tr key={item.id}>
+                <td className="muted-text">{new Date(item.createdAt).toLocaleString()}</td>
+                <td className="numeric">{formatCount(item.pointsRequested)}</td>
+                <td className="numeric">
+                  {/* Server-computed at approval; the client never asserts it. */}
+                  <Money amount={item.amountRequested} provenance="revalued" />
+                </td>
+                <td>
+                  <StatusPill status={item.status} />
+                </td>
+                <td className="muted-text">{item.note || "—"}</td>
+                <td className="actions">
+                  {item.status === "PENDING" ? (
+                    <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void act(`approve-${item.id}`, async (token) => {
+                            await approveAdminRedemption(token, item.id, {});
+                            return "Redemption approved and re-valued by the payout authority.";
+                          })
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void act(`reject-${item.id}`, async (token) => {
+                            await rejectAdminRedemption(token, item.id, {});
+                            return "Redemption rejected.";
+                          })
+                        }
+                      >
+                        Reject
+                      </button>
+                    </span>
+                  ) : item.status === "APPROVED" ? (
+                    <button
+                      className="btn btn-sm btn-primary"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => setPaying(item)}
+                    >
+                      Mark paid…
+                    </button>
+                  ) : (
+                    <span className="muted-text">—</span>
+                  )}
+                </td>
+              </tr>
             ))}
-          </div>
+          </DataTable>
         )}
-      </section>
+      </Panel>
+
+      <PaymentReferenceDialog
+        open={paying !== null}
+        busy={busy !== null}
+        title="Record redemption payment"
+        summary={
+          paying ? (
+            <>
+              {formatCount(paying.pointsRequested)} points · {formatMoney(paying.amountRequested)}. The payment is
+              re-valued by the server at execution and written to an immutable execution record.
+            </>
+          ) : null
+        }
+        onCancel={() => setPaying(null)}
+        onConfirm={(input) => {
+          const target = paying;
+          if (!target) return;
+          void act(`pay-${target.id}`, async (token) => {
+            await payAdminRedemption(token, target.id, input);
+            setPaying(null);
+            return "Payment recorded.";
+          });
+        }}
+      />
     </main>
   );
 }

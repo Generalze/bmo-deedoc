@@ -1,0 +1,57 @@
+lga,ward,stateConstituency,basis
+ABEOKUTA NORTH,AGO OKO,state-assembly-sc-726-og,token overlap (1)
+ABEOKUTA NORTH,ITA-OSHIN/OLOMORE,state-assembly-sc-726-og,token overlap (1)
+ABEOKUTA NORTH,IBARA ORILE/ONISASA,state-assembly-sc-726-og,token overlap (1)
+ABEOKUTA SOUTH,KEESI/EMERE,state-assembly-sc-723-og,token overlap (1)
+ADO ODO-OTA,AGBARA I,state-assembly-sc-748-og,token overlap (1)
+EGBADO NORTH,IDO FOI,state-assembly-sc-743-og,REVIEW: no name match
+EGBADO NORTH,AYE TORO I,state-assembly-sc-743-og,REVIEW: no name match
+EGBADO NORTH,AYE TORO II,state-assembly-sc-743-og,REVIEW: no name match
+EGBADO NORTH,IMASAI,state-assembly-sc-743-og,REVIEW: no name match
+EGBADO NORTH,OHUNBE,state-assembly-sc-743-og,REVIEW: no name match
+EWEKORO,PAPALANTO,state-assembly-sc-730-og,sole constituency in LGA
+IFO,AGBADO,state-assembly-sc-728-og,REVIEW: no name match
+IFO,ISERI,state-assembly-sc-728-og,REVIEW: no name match
+IFO,AJUWON/AKUTE,state-assembly-sc-728-og,REVIEW: no name match
+IFO,OKE-ARO/IBARAGUN/ROBIYAN,state-assembly-sc-728-og,REVIEW: no name match
+IFO,OSOSUN,state-assembly-sc-728-og,REVIEW: no name match
+IFO,SUNREN,state-assembly-sc-728-og,REVIEW: no name match
+IJEBU EAST,IMOBI II,state-assembly-sc-733-og,token overlap (1)
+IJEBU EAST,AJEBANDELE,state-assembly-sc-733-og,sole constituency in LGA
+IJEBU NORTH,OKE SOPIN,state-assembly-sc-731-og,token overlap (1)
+IJEBU NORTH EAST,ATAN/IMUKU,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,ODOSIMADEGUN/ODOSEBORA,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,IMEWIRO/ODODEYO/IMOMO,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,ODESENLU,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,IGEDE/ITAMARUN,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,OJU ONA,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,ISOYIN,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,ILESE,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,OKE-ERI/OGBOGBO,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU NORTH EAST,ERUNWON,state-assembly-sc-737-og,sole constituency in LGA
+IJEBU ODE,ODO-ESA,state-assembly-sc-735-og,token overlap (1)
+IJEBU ODE,POROGUN I,state-assembly-sc-735-og,token overlap (1)
+IJEBU ODE,ISIWO,state-assembly-sc-735-og,token overlap (1)
+IMEKO/AFON,ILARA/ALAGBE,state-assembly-sc-742-og,token overlap (1)
+IMEKO/AFON,IDI AYIN,state-assembly-sc-742-og,sole constituency in LGA
+IPOKIA,IPOKIA II,state-assembly-sc-745-og,token overlap (1)
+IPOKIA,MAUNI I,state-assembly-sc-745-og,sole constituency in LGA
+IPOKIA,MAUNI II,state-assembly-sc-745-og,sole constituency in LGA
+IPOKIA,IFONYINTEDO,state-assembly-sc-745-og,sole constituency in LGA
+IPOKIA,IDIROKO,state-assembly-sc-745-og,token overlap (1)
+IPOKIA,IHUNBO/ ILASE,state-assembly-sc-745-og,token overlap (1)
+OBAFEMI/OWODE,MOLOKO-ASIPA,state-assembly-sc-727-og,token overlap (1)
+ODEDA,OBETE,state-assembly-sc-725-og,sole constituency in LGA
+ODOGBOLU,ODOGBOLU II,state-assembly-sc-736-og,token overlap (1)
+ODOGBOLU,AIYEPE,state-assembly-sc-736-og,sole constituency in LGA
+ODOGBOLU,ALA/IGBILE,state-assembly-sc-736-og,token overlap (1)
+REMO NORTH,IGAN/AJINA,state-assembly-sc-941-og,token overlap (1)
+REMO NORTH,ILARA,state-assembly-sc-941-og,sole constituency in LGA
+REMO NORTH,IPARA,state-assembly-sc-941-og,sole constituency in LGA
+SAGAMU,AYEGBAMI/IJOKUN,state-assembly-sc-738-og,token overlap (1)
+SAGAMU,SABO 1,state-assembly-sc-738-og,token overlap (1)
+SAGAMU,SABO II,state-assembly-sc-738-og,token overlap (1)
+SAGAMU,ISOKUN / OYEBAJO,state-assembly-sc-738-og,token overlap (1)
+SAGAMU,SIMAWA / IWELEPE,state-assembly-sc-739-og,token overlap (1)
+SAGAMU,AGBOWA,state-assembly-sc-738-og,REVIEW: no name match
+IFO,568:6511,state-assembly-sc-729-og,REVIEW: constituency had no ward; moved from same-LGA sibling

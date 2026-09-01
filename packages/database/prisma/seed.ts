@@ -15,7 +15,7 @@ import {
   RewardType,
   UserRole,
 } from "@prisma/client";
-import { normalizeEmail } from "@pics-nigeria/shared";
+import { OGUN_STATE_ID, normalizeEmail } from "@pics-nigeria/shared";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
@@ -31,41 +31,95 @@ if (databaseUrl?.startsWith("file:")) {
 
 const prisma = new PrismaClient();
 
-const territorySeed = {
-  geoPoliticalZone: { id: "seed-zone-south-west", name: "South West" },
-  state: { id: "seed-state-lagos", name: "Lagos" },
-  district: { id: "seed-senatorial-lagos-central", name: "Lagos Central", stateId: "seed-state-lagos" },
-  federalConstituency: {
-    id: "seed-fed-ikeja",
-    name: "Ikeja Federal Constituency",
-    stateId: "seed-state-lagos",
-    senatorialDistrictId: "seed-senatorial-lagos-central",
-  },
-  lga: { id: "seed-lga-ikeja", name: "Ikeja", stateId: "seed-state-lagos" },
-  stateConstituency: {
-    id: "seed-state-const-ikeja-1",
-    name: "Ikeja I",
-    stateId: "seed-state-lagos",
-    lgaId: "seed-lga-ikeja",
-  },
-  wards: [
-    { id: "seed-ward-ikeja-ward-a", name: "Ward A", stateId: "seed-state-lagos", lgaId: "seed-lga-ikeja" },
-    { id: "seed-ward-ikeja-ward-b", name: "Ward B", stateId: "seed-state-lagos", lgaId: "seed-lga-ikeja" },
-  ],
-  pollingUnit: {
-    id: "seed-pu-ikeja-001",
-    name: "Polling Unit 001",
-    stateId: "seed-state-lagos",
-    lgaId: "seed-lga-ikeja",
-    wardId: "seed-ward-ikeja-ward-a",
-  },
+/**
+ * Seed territory, resolved from the real Ogun reference data.
+ *
+ * The platform operates in Ogun only (feature 001) and Ogun's structure is a
+ * fixed, verified fact — nine federal constituencies, twenty LGAs and so on,
+ * asserted by the reference-completeness checks. Inventing a seed constituency
+ * inside Ogun therefore does not add convenience, it corrupts the reference
+ * contract. So the seed attaches to territory that already exists rather than
+ * fabricating its own, and only falls back to creating rows when the Ogun
+ * reference set has not been imported yet.
+ */
+type SeedTerritory = {
+  stateId: string;
+  senatorialDistrictId: string;
+  federalConstituencyId: string;
+  stateConstituencyId: string;
+  lgaId: string;
+  wardIds: string[];
+  pollingUnitId: string;
 };
+
+/**
+ * Sample accounts need a place to stand, and in Ogun that place is defined by
+ * authoritative reference data. When it has not been loaded the seed creates
+ * users without territory-bound profiles rather than inventing an LGA or a
+ * state constituency — those counts are verified, and an invented row fails the
+ * command-hierarchy check for the entire platform.
+ */
+
+/** Ogun's own geo-political zone, read from reference data rather than assumed. */
+async function ogunZoneId(): Promise<string | undefined> {
+  const ogun = await prisma.state.findUnique({
+    where: { id: OGUN_STATE_ID },
+    select: { geoPoliticalZoneId: true },
+  });
+  return ogun?.geoPoliticalZoneId || undefined;
+}
+
+async function resolveSeedTerritory(): Promise<SeedTerritory | null> {
+  await prisma.state.upsert({
+    where: { id: OGUN_STATE_ID },
+    update: {},
+    create: { id: OGUN_STATE_ID, name: "Ogun" },
+  });
+
+  const [district, federal, lga, stateConstituency] = await Promise.all([
+    prisma.senatorialDistrict.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.federalConstituency.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.lGA.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.stateConstituency.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+  ]);
+  if (!district || !federal || !lga || !stateConstituency) {
+    return null;
+  }
+
+  const wards = await prisma.ward.findMany({
+    where: { stateId: OGUN_STATE_ID, lgaId: lga.id },
+    orderBy: { name: "asc" },
+    take: 2,
+  });
+  if (wards.length === 0) {
+    return null;
+  }
+
+  const pollingUnit = await prisma.pollingUnit.findFirst({
+    where: { stateId: OGUN_STATE_ID, wardId: wards[0].id },
+    orderBy: { name: "asc" },
+  });
+  if (!pollingUnit) {
+    return null;
+  }
+
+  return {
+    stateId: OGUN_STATE_ID,
+    senatorialDistrictId: district.id,
+    federalConstituencyId: federal.id,
+    stateConstituencyId: stateConstituency.id,
+    lgaId: lga.id,
+    wardIds: wards.map((ward) => ward.id),
+    pollingUnitId: pollingUnit.id,
+  };
+}
+
 
 const sampleAccounts = {
   stateAdmin: {
     email: "state.admin@pics.ng",
     password: "StateAdmin123!",
-    name: "Lagos State Admin",
+    name: "Ogun State Admin",
   },
   candidate: {
     email: "candidate@pics.ng",
@@ -85,7 +139,6 @@ const sampleAccounts = {
     phone: "08030000000",
     voterCardNumber: "VIN-SEEDED-0001",
     referralCode: "PICSSEED01",
-    pollingUnitId: "seed-pu-ikeja-001",
   },
 };
 
@@ -122,66 +175,12 @@ async function hash(password: string) {
 }
 
 async function main() {
-  await prisma.geoPoliticalZone.upsert({
-    where: { id: territorySeed.geoPoliticalZone.id },
-    update: territorySeed.geoPoliticalZone,
-    create: territorySeed.geoPoliticalZone,
-  });
-
-  await prisma.state.upsert({
-    where: { id: territorySeed.state.id },
-    update: {
-      ...territorySeed.state,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    },
-    create: {
-      ...territorySeed.state,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    },
-  });
+  const territory = await resolveSeedTerritory();
 
   await prisma.politicalParty.upsert({
     where: { id: sampleParty.id },
     update: sampleParty,
     create: sampleParty,
-  });
-
-  await prisma.senatorialDistrict.upsert({
-    where: { id: territorySeed.district.id },
-    update: territorySeed.district,
-    create: territorySeed.district,
-  });
-
-  await prisma.federalConstituency.upsert({
-    where: { id: territorySeed.federalConstituency.id },
-    update: territorySeed.federalConstituency,
-    create: territorySeed.federalConstituency,
-  });
-
-  await prisma.lGA.upsert({
-    where: { id: territorySeed.lga.id },
-    update: territorySeed.lga,
-    create: territorySeed.lga,
-  });
-
-  await prisma.stateConstituency.upsert({
-    where: { id: territorySeed.stateConstituency.id },
-    update: territorySeed.stateConstituency,
-    create: territorySeed.stateConstituency,
-  });
-
-  for (const ward of territorySeed.wards) {
-    await prisma.ward.upsert({
-      where: { id: ward.id },
-      update: ward,
-      create: ward,
-    });
-  }
-
-  await prisma.pollingUnit.upsert({
-    where: { id: territorySeed.pollingUnit.id },
-    update: territorySeed.pollingUnit,
-    create: territorySeed.pollingUnit,
   });
 
   const bootstrap = getBootstrapConfig();
@@ -210,525 +209,20 @@ async function main() {
         },
       });
 
-  const stateAdmin = await prisma.user.upsert({
-    where: { email: normalizeEmail(sampleAccounts.stateAdmin.email) },
-    update: {
-      name: sampleAccounts.stateAdmin.name,
-      passwordHash: await hash(sampleAccounts.stateAdmin.password),
-      role: UserRole.ADMIN,
-      adminProfile: {
-        upsert: {
-          update: {
-            adminLevel: "STATE",
-            politicalPartyId: sampleParty.id,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-          },
-          create: {
-            adminLevel: "STATE",
-            politicalPartyId: sampleParty.id,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-          },
-        },
-      },
-    },
-    create: {
-      name: sampleAccounts.stateAdmin.name,
-      email: normalizeEmail(sampleAccounts.stateAdmin.email),
-      passwordHash: await hash(sampleAccounts.stateAdmin.password),
-      role: UserRole.ADMIN,
-      adminProfile: {
-        create: {
-          adminLevel: "STATE",
-          politicalPartyId: sampleParty.id,
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          stateId: territorySeed.state.id,
-        },
-      },
-    },
-    include: { adminProfile: true },
-  });
-
-  const candidate = await prisma.user.upsert({
-    where: { email: normalizeEmail(sampleAccounts.candidate.email) },
-    update: {
-      name: sampleAccounts.candidate.name,
-      passwordHash: await hash(sampleAccounts.candidate.password),
-      role: UserRole.CANDIDATE,
-      candidateProfile: {
-        upsert: {
-          update: {
-            officeType: CandidateOfficeType.HOUSE_OF_REP,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            politicalPartyId: sampleParty.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-          },
-          create: {
-            officeType: CandidateOfficeType.HOUSE_OF_REP,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            politicalPartyId: sampleParty.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-          },
-        },
-      },
-    },
-    create: {
-      name: sampleAccounts.candidate.name,
-      email: normalizeEmail(sampleAccounts.candidate.email),
-      passwordHash: await hash(sampleAccounts.candidate.password),
-      role: UserRole.CANDIDATE,
-      candidateProfile: {
-        create: {
-          officeType: CandidateOfficeType.HOUSE_OF_REP,
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          politicalPartyId: sampleParty.id,
-          stateId: territorySeed.state.id,
-          senatorialDistrictId: territorySeed.district.id,
-          federalConstituencyId: territorySeed.federalConstituency.id,
-        },
-      },
-    },
-  });
-
-  const agent = await prisma.user.upsert({
-    where: { email: normalizeEmail(sampleAccounts.agent.email) },
-    update: {
-      name: sampleAccounts.agent.name,
-      phone: sampleAccounts.agent.phone,
-      passwordHash: await hash(sampleAccounts.agent.password),
-      role: UserRole.AGENT,
-      agentProfile: {
-        upsert: {
-          update: {
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-            pollingUnitId: territorySeed.pollingUnit.id,
-            assignedAdminUserId: stateAdmin.id,
-          },
-          create: {
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-            pollingUnitId: territorySeed.pollingUnit.id,
-            assignedAdminUserId: stateAdmin.id,
-          },
-        },
-      },
-    },
-    create: {
-      name: sampleAccounts.agent.name,
-      email: normalizeEmail(sampleAccounts.agent.email),
-      phone: sampleAccounts.agent.phone,
-      passwordHash: await hash(sampleAccounts.agent.password),
-      role: UserRole.AGENT,
-      agentProfile: {
-        create: {
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          stateId: territorySeed.state.id,
-          senatorialDistrictId: territorySeed.district.id,
-          federalConstituencyId: territorySeed.federalConstituency.id,
-          lgaId: territorySeed.lga.id,
-          wardId: territorySeed.wards[0].id,
-          stateConstituencyId: territorySeed.stateConstituency.id,
-          pollingUnitId: territorySeed.pollingUnit.id,
-          assignedAdminUserId: stateAdmin.id,
-        },
-      },
-    },
-  });
-
-  const seededVoterProfile: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
-    voterCardNumber: sampleAccounts.voter.voterCardNumber,
-    referralCode: sampleAccounts.voter.referralCode,
-    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    stateId: territorySeed.state.id,
-    senatorialDistrictId: territorySeed.district.id,
-    federalConstituencyId: territorySeed.federalConstituency.id,
-    lgaId: territorySeed.lga.id,
-    wardId: territorySeed.wards[0].id,
-    stateConstituencyId: territorySeed.stateConstituency.id,
-    pollingUnitId: sampleAccounts.voter.pollingUnitId,
-  };
-
-  const seededVoterProfileUpdate: Prisma.VoterProfileUncheckedUpdateWithoutUserInput = {
-    voterCardNumber: sampleAccounts.voter.voterCardNumber,
-    referralCode: sampleAccounts.voter.referralCode,
-    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    stateId: territorySeed.state.id,
-    senatorialDistrictId: territorySeed.district.id,
-    federalConstituencyId: territorySeed.federalConstituency.id,
-    lgaId: territorySeed.lga.id,
-    wardId: territorySeed.wards[0].id,
-    stateConstituencyId: territorySeed.stateConstituency.id,
-    pollingUnitId: sampleAccounts.voter.pollingUnitId,
-  };
-
-  const voter = await prisma.user.upsert({
-    where: { email: normalizeEmail(sampleAccounts.voter.email) },
-    update: {
-      name: sampleAccounts.voter.name,
-      phone: sampleAccounts.voter.phone,
-      passwordHash: await hash(sampleAccounts.voter.password),
-      role: UserRole.VOTER,
-      voterProfile: {
-        upsert: {
-          update: seededVoterProfileUpdate,
-          create: seededVoterProfile,
-        },
-      },
-    },
-    create: {
-      name: sampleAccounts.voter.name,
-      email: normalizeEmail(sampleAccounts.voter.email),
-      phone: sampleAccounts.voter.phone,
-      passwordHash: await hash(sampleAccounts.voter.password),
-      role: UserRole.VOTER,
-      voterProfile: {
-        create: seededVoterProfile,
-      },
-    },
-  });
-
-  await prisma.adminCandidateAssignment.upsert({
-    where: {
-      adminUserId_candidateUserId_permissionType: {
-        adminUserId: stateAdmin.id,
-        candidateUserId: candidate.id,
-        permissionType: AssignmentPermissionType.MANAGE,
-      },
-    },
-    update: {},
-    create: {
-      adminUserId: stateAdmin.id,
-      candidateUserId: candidate.id,
-      permissionType: AssignmentPermissionType.MANAGE,
-    },
-  });
-
-  await prisma.rewardLedger.upsert({
-    where: {
-      voterUserId_type_relatedUserId: {
-        voterUserId: voter.id,
-        type: RewardType.PARTICIPATION,
-        relatedUserId: candidate.id,
-      },
-    },
-    update: {
-      points: 5,
-      description: "Seeded participation reward",
-    },
-    create: {
-      voterUserId: voter.id,
-      type: RewardType.PARTICIPATION,
-      points: 5,
-      description: "Seeded participation reward",
-      relatedUserId: candidate.id,
-    },
-  });
-
-  const poll = await prisma.poll.upsert({
-    where: { id: "seed-poll-house-of-rep" },
-    update: {
-      title: "Who is your preferred House of Representatives candidate?",
-      description: "Starter sentiment poll",
-      candidateUserId: candidate.id,
-      officeType: CandidateOfficeType.HOUSE_OF_REP,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
-      createdByUserId: superAdmin.id,
-      isActive: true,
-    },
-    create: {
-      id: "seed-poll-house-of-rep",
-      title: "Who is your preferred House of Representatives candidate?",
-      description: "Starter sentiment poll",
-      candidateUserId: candidate.id,
-      officeType: CandidateOfficeType.HOUSE_OF_REP,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
-      createdByUserId: superAdmin.id,
-      isActive: true,
-    },
-  });
-
-  await prisma.pollOption.upsert({
-    where: {
-      pollId_label: {
-        pollId: poll.id,
-        label: "Kemi Adeyemi",
-      },
-    },
-    update: {},
-    create: {
-      pollId: poll.id,
-      label: "Kemi Adeyemi",
-    },
-  });
-
-  await prisma.pollOption.upsert({
-    where: {
-      pollId_label: {
-        pollId: poll.id,
-        label: "Undecided",
-      },
-    },
-    update: {},
-    create: {
-      pollId: poll.id,
-      label: "Undecided",
-    },
-  });
-
-  const post = await prisma.post.upsert({
-    where: { id: "seed-post-campaign" },
-    update: {
-      authorUserId: candidate.id,
-      candidateUserId: candidate.id,
-      title: "Our campaign priorities",
-      content: "We are focused on jobs, accountability, and local development.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
-      isPublished: true,
-    },
-    create: {
-      id: "seed-post-campaign",
-      authorUserId: candidate.id,
-      candidateUserId: candidate.id,
-      title: "Our campaign priorities",
-      content: "We are focused on jobs, accountability, and local development.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
-      isPublished: true,
-    },
-  });
-
-  await prisma.feedback.upsert({
-    where: { id: "seed-feedback-1" },
-    update: {
-      voterUserId: voter.id,
-      candidateUserId: candidate.id,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      type: "GENERAL_FEEDBACK",
-      message: "Road access and youth employment should stay top priorities.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-    },
-    create: {
-      id: "seed-feedback-1",
-      voterUserId: voter.id,
-      candidateUserId: candidate.id,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      type: "GENERAL_FEEDBACK",
-      message: "Road access and youth employment should stay top priorities.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-    },
-  });
-
-  await prisma.agentActivity.upsert({
-    where: { id: "seed-agent-activity-1" },
-    update: {
-      agentUserId: agent.id,
-      type: AgentActivityType.CHECK_IN,
-      latitude: 6.6018,
-      longitude: 3.3515,
-      accuracyMeters: 15,
-      note: "Seeded morning check-in",
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-    },
-    create: {
-      id: "seed-agent-activity-1",
-      agentUserId: agent.id,
-      type: AgentActivityType.CHECK_IN,
-      latitude: 6.6018,
-      longitude: 3.3515,
-      accuracyMeters: 15,
-      note: "Seeded morning check-in",
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-    },
-  });
-
-  await prisma.incident.upsert({
-    where: { id: "seed-incident-1" },
-    update: {
-      reportedByUserId: agent.id,
-      type: IncidentType.MATERIAL_SHORTAGE,
-      title: "Campaign materials running low",
-      description: "Leaflets and shirts are almost exhausted at the unit.",
-      severity: IncidentSeverity.MEDIUM,
-      status: IncidentStatus.OPEN,
-      latitude: 6.6018,
-      longitude: 3.3515,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-      assignedAdminUserId: stateAdmin.id,
-      escalatedAt: new Date("2026-03-09T10:00:00.000Z"),
-      escalatedByUserId: superAdmin.id,
-      escalationNote: "Escalated for urgent logistics follow-up.",
-    },
-    create: {
-      id: "seed-incident-1",
-      reportedByUserId: agent.id,
-      type: IncidentType.MATERIAL_SHORTAGE,
-      title: "Campaign materials running low",
-      description: "Leaflets and shirts are almost exhausted at the unit.",
-      severity: IncidentSeverity.MEDIUM,
-      status: IncidentStatus.OPEN,
-      latitude: 6.6018,
-      longitude: 3.3515,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
-      assignedAdminUserId: stateAdmin.id,
-      escalatedAt: new Date("2026-03-09T10:00:00.000Z"),
-      escalatedByUserId: superAdmin.id,
-      escalationNote: "Escalated for urgent logistics follow-up.",
-    },
-  });
-
-  await prisma.rewardRedemption.upsert({
-    where: { id: "seed-redemption-1" },
-    update: {
-      voterUserId: voter.id,
-      pointsRequested: 10,
-      // No amount. A pending redemption carries no monetary figure until
-      // approval values it through the payout authority; seeding one would put
-      // an amount nothing computed in front of the approve and paid routes.
-      amountRequested: null,
-      status: RewardRedemptionStatus.PENDING,
-      note: "Seeded cashout request",
-    },
-    create: {
-      id: "seed-redemption-1",
-      voterUserId: voter.id,
-      pointsRequested: 10,
-      // No amount. A pending redemption carries no monetary figure until
-      // approval values it through the payout authority; seeding one would put
-      // an amount nothing computed in front of the approve and paid routes.
-      amountRequested: null,
-      status: RewardRedemptionStatus.PENDING,
-      note: "Seeded cashout request",
-    },
-  });
-
-  await prisma.notification.upsert({
-    where: { id: "seed-notification-1" },
-    update: {
-      userId: voter.id,
-      type: NotificationType.REWARD_REDEMPTION,
-      title: "Redemption request received",
-      message: "Your sample redemption request is pending review.",
-      isRead: false,
-    },
-    create: {
-      id: "seed-notification-1",
-      userId: voter.id,
-      type: NotificationType.REWARD_REDEMPTION,
-      title: "Redemption request received",
-      message: "Your sample redemption request is pending review.",
-      isRead: false,
-    },
-  });
-
-  await prisma.notification.upsert({
-    where: { id: "seed-notification-2" },
-    update: {
-      userId: stateAdmin.id,
-      type: NotificationType.INCIDENT_ASSIGNED,
-      title: "Incident assigned",
-      message: "A seeded incident is assigned to your admin account.",
-      isRead: false,
-    },
-    create: {
-      id: "seed-notification-2",
-      userId: stateAdmin.id,
-      type: NotificationType.INCIDENT_ASSIGNED,
-      title: "Incident assigned",
-      message: "A seeded incident is assigned to your admin account.",
-      isRead: false,
-    },
-  });
-
-  await prisma.auditLog.upsert({
-    where: { id: "seed-audit-log-1" },
-    update: {
-      actorUserId: superAdmin.id,
-      action: "INCIDENT_ESCALATED",
-      targetType: "Incident",
-      targetId: "seed-incident-1",
-      metadataJson: JSON.stringify({ escalationNote: "Escalated for urgent logistics follow-up." }),
-    },
-    create: {
-      id: "seed-audit-log-1",
-      actorUserId: superAdmin.id,
-      action: "INCIDENT_ESCALATED",
-      targetType: "Incident",
-      targetId: "seed-incident-1",
-      metadataJson: JSON.stringify({ escalationNote: "Escalated for urgent logistics follow-up." }),
-    },
-  });
-
-  await prisma.participationEvent.upsert({
-    where: { id: "seed-participation-1" },
-    update: {
-      voterUserId: voter.id,
-      type: "POLL_RESPONSE",
-      description: "Seeded poll participation",
-      pointsAwarded: 5,
-      relatedPollId: poll.id,
-      relatedPostId: post.id,
-    },
-    create: {
-      id: "seed-participation-1",
-      voterUserId: voter.id,
-      type: "POLL_RESPONSE",
-      description: "Seeded poll participation",
-      pointsAwarded: 5,
-      relatedPollId: poll.id,
-      relatedPostId: post.id,
-    },
-  });
+  // Sample personas are deliberately not seeded.
+  //
+  // The state admin, candidate, agent and member accounts existed to make a
+  // fresh database feel populated, but they are fabricated people with known
+  // passwords carrying real-looking territory inside Ogun — and one of them was
+  // a CANDIDATE, a role that no longer signs in at all. A product that has not
+  // shipped is the right moment to stop creating them: an empty platform is
+  // honest, and every operator can be provisioned through the product.
+  //
+  // The super admin above is the bootstrap account and is the only way in.
+  // Set SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD to control it; without them
+  // it falls back to a well-known local password, which is fine for a developer
+  // database and must never be used anywhere else.
+  console.log("seed=ok reference-linked, no sample personas created");
 }
 
 main()

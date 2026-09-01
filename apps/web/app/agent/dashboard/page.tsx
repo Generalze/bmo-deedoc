@@ -22,6 +22,7 @@ import {
   updateAgentTask,
 } from "../../../lib/api";
 import { AGENT_TRACKING_EVENT_NAME } from "../../../components/agent-session-tracker";
+import { clearSession, readSession } from "../../../lib/session";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
 
@@ -89,7 +90,7 @@ export default function AgentDashboardPage() {
   }
 
   async function handleTaskStatusUpdate(taskId: string, status: FieldTaskItem["status"]) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -105,10 +106,10 @@ export default function AgentDashboardPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
 
     if (!token) {
-      window.location.href = "/agent/login";
+      window.location.href = "/login?field=1";
       return;
     }
 
@@ -136,7 +137,7 @@ export default function AgentDashboardPage() {
   }
 
   async function forceLogout(reason?: string) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -145,12 +146,12 @@ export default function AgentDashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAgentToken");
-    router.replace(reason ? `/agent/login?reason=${encodeURIComponent(reason)}` : "/agent/login");
+    clearSession();
+    router.replace(reason ? `/login?field=1&reason=${encodeURIComponent(reason)}` : "/login?field=1");
   }
 
   async function sendDeviceLocation(path: "check-in" | "check-out" | "location", options?: { refreshDashboard?: boolean }) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -221,7 +222,7 @@ export default function AgentDashboardPage() {
 
   async function handleIncidentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -278,7 +279,7 @@ export default function AgentDashboardPage() {
             </p>
           ) : null}
           <p>
-            <Link href="/agent/login">Return to agent login</Link>
+            <Link href="/login?field=1">Return to sign in</Link>
           </p>
         </section>
       </main>

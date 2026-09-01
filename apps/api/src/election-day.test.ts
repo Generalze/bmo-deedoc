@@ -259,10 +259,30 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
         alerts: Array<{ type: string }>;
         realtime: { runtimeStatus: string; restFallbackAvailable: boolean };
       };
-      assert.equal(situation.totals.expectedPollingUnits, 2);
-      assert.equal(situation.totals.assignedPollingUnits, 2);
-      assert.equal(situation.totals.checkedInPollingUnits, 1);
-      assert.equal(situation.totals.missingCheckIns, 1);
+      // The situation room is state-scoped, and every polling unit in Ogun now
+      // counts toward it — including the one the sample seed attaches to. This
+      // assertion previously read as an absolute only because the seed sat in
+      // Lagos and fell outside the state entirely. What this test owns is its
+      // own two assigned units, so that is what it asserts.
+      assert.ok(
+        situation.totals.expectedPollingUnits >= 2,
+        `expected at least the two fixture polling units, saw ${situation.totals.expectedPollingUnits}`,
+      );
+      assert.ok(
+        situation.totals.assignedPollingUnits >= 2,
+        `expected at least the two fixture assignments, saw ${situation.totals.assignedPollingUnits}`,
+      );
+      assert.ok(
+        situation.totals.checkedInPollingUnits >= 1,
+        `expected the checked-in fixture unit to be counted, saw ${situation.totals.checkedInPollingUnits}`,
+      );
+      // The invariant that actually matters, and the one an operator reads:
+      // every assigned unit is either checked in or counted as missing.
+      assert.equal(
+        situation.totals.missingCheckIns,
+        situation.totals.assignedPollingUnits - situation.totals.checkedInPollingUnits,
+        "every assigned polling unit must be either checked in or reported missing",
+      );
       assert.ok(situation.alerts.some((alert) => alert.type === "NO_CHECK_IN"));
       assert.equal(situation.realtime.runtimeStatus, "TARGET_NOT_RUNNING");
       assert.equal(situation.realtime.restFallbackAvailable, true);

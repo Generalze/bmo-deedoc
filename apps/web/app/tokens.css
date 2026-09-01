@@ -1,0 +1,146 @@
+/**
+ * Dispatch console token layer.
+ *
+ * The product is an election-operations console, not a consumer app. An officer
+ * is on a laptop in a field office at 6am, possibly on a bad connection, and
+ * every screen has to answer three questions in under two seconds: what is the
+ * state of my territory, what is refused right now and why, and what am I
+ * allowed to do about it. Density and legibility beat decoration.
+ *
+ * These tokens replace 22 ad-hoc font sizes, 21 radii, 25 shadows and 143
+ * inline style objects that had only five distinct spacing values between them.
+ */
+
+:root {
+  /* ---- Colour ---------------------------------------------------------
+   * The existing palette measured well and is kept: --text on --bg is 14.09:1,
+   * --navy 13.4, --danger 7.37, --accent 6.5, --muted 5.22. What was missing is
+   * semantic state.
+   */
+  --flag-green: #0a8f4d;
+  --navy: #12314b;
+  --navy-soft: #1d4464;
+
+  --bg: #eef2f4;
+  --bg-deep: #e4eaee;
+  --surface: #ffffff;
+  --surface-sunken: #f4f7f9;
+  --surface-raised: #ffffff;
+
+  --text: #101f2e;
+  --text-secondary: #3d5163;
+  --muted: #5a6b79;
+  --text-inverse: #f7fafc;
+
+  --line: rgba(16, 31, 46, 0.1);
+  --line-strong: rgba(16, 31, 46, 0.18);
+  --line-heavy: rgba(16, 31, 46, 0.28);
+
+  --accent: #0c6b4f;
+  --accent-hover: #0a5941;
+  --accent-quiet: rgba(12, 107, 79, 0.08);
+  --danger: #a12828;
+  --danger-quiet: rgba(161, 40, 40, 0.08);
+
+  /* Operational state. Refusal is deliberately NOT the same colour as a load
+   * error: "the system declined this on purpose" and "something broke" are
+   * different facts and an operator must not have to read text to tell them
+   * apart. */
+  --state-refused: #8a5a00;
+  --state-refused-bg: rgba(138, 90, 0, 0.1);
+  --state-pending: #1d4464;
+  --state-pending-bg: rgba(29, 68, 100, 0.09);
+  --state-executed: #0c6b4f;
+  --state-executed-bg: rgba(12, 107, 79, 0.1);
+  --state-legacy: #5b4a86;
+  --state-legacy-bg: rgba(91, 74, 134, 0.1);
+  --state-stale: #5a6b79;
+  --state-stale-bg: rgba(90, 107, 121, 0.1);
+  --state-error: #a12828;
+  --state-error-bg: rgba(161, 40, 40, 0.08);
+
+  /* ---- Type -----------------------------------------------------------
+   * One family. Six sizes. --fs-num carries tabular figures and is mandatory on
+   * every money and count figure, so columns of numbers align on the decimal
+   * and a changing value does not reflow its neighbours.
+   */
+  --font-sans:
+    "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --fs-100: 0.75rem; /* 12px - table meta, badges */
+  --fs-200: 0.8125rem; /* 13px - dense table body */
+  --fs-300: 0.875rem; /* 14px - body default */
+  --fs-400: 1rem; /* 16px - section lead */
+  --fs-500: 1.25rem; /* 20px - panel title */
+  --fs-600: 1.75rem; /* 28px - stat figure */
+  --fs-700: 2.25rem; /* 36px - page hero figure */
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-normal: 1.55;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --tracking-wide: 0.08em;
+
+  /* ---- Space ---------------------------------------------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  /* ---- Radius ---------------------------------------------------------- */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-full: 999px;
+
+  /* ---- Elevation -------------------------------------------------------
+   * A console should be mostly flat. Shadow means "floating above the page",
+   * not "is a card" — data surfaces get --e-0 and a hairline instead.
+   */
+  --e-0: none;
+  --e-1: 0 1px 2px rgba(16, 31, 46, 0.06);
+  --e-2: 0 4px 12px rgba(16, 31, 46, 0.1);
+  --e-3: 0 16px 40px rgba(16, 31, 46, 0.18);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- Density ---------------------------------------------------------
+   * A payout batch or redemption queue should show ~25 rows on a 900px
+   * viewport, not 6.
+   */
+  --row-h: 2rem;
+  --cell-px: 0.5rem;
+  --shell-max: 1440px;
+}
+
+/* Keyboard operators exist. There were no focus-visible rings anywhere. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* The map marker pulse was the only animation and had no reduced-motion guard. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

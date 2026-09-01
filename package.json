@@ -36,7 +36,7 @@
     "report:reference:ogun": "npm run report:reference:ogun --workspace @pics-nigeria/database",
     "verify:reference:ogun-contract": "npm run verify:reference:ogun-contract --workspace @pics-nigeria/database",
     "validate:reference:ogun-release": "npm run validate:reference:ogun-release --workspace @pics-nigeria/database",
-    "import:reference:ogun": "npm run import:reference:ogun --workspace @pics-nigeria/database",
+    "import:reference:ogun": "npm run import:reference:ogun --workspace @pics-nigeria/database --",
     "migrate:phase1-identities": "npm run migrate:phase1-identities --workspace @pics-nigeria/database --",
     "db:dev:up": "docker compose -f docker-compose.dev.yml up -d --wait postgres",
     "db:dev:down": "docker compose -f docker-compose.dev.yml down",

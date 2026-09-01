@@ -26,12 +26,14 @@ type Branch = {
 };
 
 const password = "Phase1Test123!";
-const lgaId = "phase1-test-lga-reference-only";
+/** A real Ogun LGA, resolved at setup. LGA is reference data, not a command level. */
+let lgaId = "";
 const createdCandidateIds = new Set<string>();
 let branches: Branch[] = [];
 let baseUrl = "";
 let server: http.Server | null = null;
 let stateOfficerEmail = "";
+let superAdminEmail = "";
 let wardCoordinatorEmail = "";
 let memberEmail = "";
 let validatorEmail = "";
@@ -65,71 +67,47 @@ function testEmail(label: string) {
   return `phase1-test-${label}@pics.ng`;
 }
 
+/**
+ * Builds the command branches this suite exercises from the real Ogun reference
+ * structure.
+ *
+ * It used to synthesise 20 LGAs and 26 state constituencies, because the count
+ * gate demands exactly those numbers and no authoritative Ogun dataset existed.
+ * Now one does, and inventing a parallel structure alongside it simply doubles
+ * every count and blocks the very hierarchy this suite needs.
+ */
 async function createCommandHierarchy() {
-  for (let index = 0; index < 20; index += 1) {
-    const suffix = String(index + 1).padStart(2, "0");
-    const fixtureLgaId = index === 0 ? lgaId : `phase1-test-lga-reference-${suffix}`;
-    await prisma.lGA.upsert({
-      where: { id: fixtureLgaId },
-      update: { name: `Phase 1 Reference LGA ${suffix}`, stateId: OGUN_STATE_ID },
-      create: { id: fixtureLgaId, name: `Phase 1 Reference LGA ${suffix}`, stateId: OGUN_STATE_ID },
-    });
-  }
-  const federalConstituencies = await prisma.federalConstituency.findMany({
-    where: { stateId: OGUN_STATE_ID },
+  const stateConstituencies = await prisma.stateConstituency.findMany({
+    where: {
+      stateId: OGUN_STATE_ID,
+      federalConstituencyId: { not: null },
+      wards: { some: { pollingUnits: { some: {} } } },
+    },
     orderBy: { id: "asc" },
-    select: { id: true, senatorialDistrictId: true },
+    select: {
+      id: true,
+      federalConstituency: { select: { id: true, senatorialDistrictId: true } },
+      wards: {
+        where: { pollingUnits: { some: {} } },
+        orderBy: { id: "asc" },
+        take: 1,
+        select: { id: true, pollingUnits: { orderBy: { id: "asc" }, take: 1, select: { id: true } } },
+      },
+    },
   });
-  assert.ok(federalConstituencies.length >= 2, "Ogun Federal Constituency references are required.");
 
-  branches = [];
-  for (let index = 0; index < 26; index += 1) {
-    const federal = federalConstituencies[index % federalConstituencies.length];
-    const suffix = String(index + 1).padStart(2, "0");
-    const stateConstituencyId = `phase1-test-state-constituency-${suffix}`;
-    const wardId = `phase1-test-ward-${suffix}`;
-    const pollingUnitId = `phase1-test-pu-${suffix}`;
-    await prisma.stateConstituency.upsert({
-      where: { id: stateConstituencyId },
-      update: { federalConstituencyId: federal.id },
-      create: {
-        id: stateConstituencyId,
-        name: `Phase 1 State Constituency ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        federalConstituencyId: federal.id,
-      },
-    });
-    await prisma.ward.upsert({
-      where: { id: wardId },
-      update: { stateConstituencyId },
-      create: {
-        id: wardId,
-        name: `Phase 1 Ward ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        stateConstituencyId,
-      },
-    });
-    await prisma.pollingUnit.upsert({
-      where: { id: pollingUnitId },
-      update: {},
-      create: {
-        id: pollingUnitId,
-        name: `Phase 1 Polling Unit ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        wardId,
-      },
-    });
-    branches.push({
-      senatorialDistrictId: federal.senatorialDistrictId,
-      federalConstituencyId: federal.id,
-      stateConstituencyId,
-      wardId,
-      pollingUnitId,
-    });
-  }
+  assert.ok(
+    stateConstituencies.length >= 26,
+    `Ogun reference data must be imported before this suite; found ${stateConstituencies.length} usable state constituencies.`,
+  );
+
+  branches = stateConstituencies.slice(0, 26).map((stateConstituency) => ({
+    senatorialDistrictId: stateConstituency.federalConstituency!.senatorialDistrictId,
+    federalConstituencyId: stateConstituency.federalConstituency!.id,
+    stateConstituencyId: stateConstituency.id,
+    wardId: stateConstituency.wards[0].id,
+    pollingUnitId: stateConstituency.wards[0].pollingUnits[0].id,
+  }));
 }
 
 function coordinatorData(level: CoordinatorLevel, branch: Branch) {
@@ -193,6 +171,15 @@ async function createTargetFixtures() {
     (branch) => branch.senatorialDistrictId !== branches[0].senatorialDistrictId,
   ) || branches[1];
   stateOfficerEmail = (await createTargetUser("state-officer", "STATE_OFFICER")).email;
+  superAdminEmail = testEmail("super-admin");
+  await prisma.user.create({
+    data: {
+      name: "Phase 1 Test Super Admin",
+      email: superAdminEmail,
+      passwordHash: await hashPassword(password),
+      role: "SUPER_ADMIN",
+    },
+  });
   await createTargetUser("senatorial", "COORDINATOR", { level: "SENATORIAL_DISTRICT", branch: branches[0] });
   await createTargetUser("federal", "COORDINATOR", { level: "FEDERAL_CONSTITUENCY", branch: branches[0] });
   await createTargetUser("state-constituency", "COORDINATOR", { level: "STATE_CONSTITUENCY", branch: branches[0] });
@@ -447,6 +434,76 @@ function mockActor(
 
 const cases: Array<{ name: string; run: () => Promise<void> }> = [
   {
+    name: "Ogun-only registration is enforced by the server, not by the form",
+    run: async () => {
+      // Feature 001. The endpoint is public and unauthenticated, so whatever it
+      // accepts is reachable regardless of what the picker offers.
+      const outsideOgun = await apiRequest("/auth/register-voter", {
+        method: "POST",
+        body: {
+          fullName: "Outside Ogun Applicant",
+          email: "phase1-outside-ogun@pics.ng",
+          phone: "08039999001",
+          password: "OutsideOgun123!",
+          voterCardNumber: "PHASE1-OUTSIDE-OGUN",
+          stateId: "ng-state-lagos",
+          lgaId: "any-lga",
+          wardId: "any-ward",
+          pollingUnitId: "any-pu",
+          acceptTerms: true,
+          acceptPrivacy: true,
+          contactConsent: true,
+          confirmAdult: true,
+        },
+      });
+      assert.equal(outsideOgun.status, 400, JSON.stringify(outsideOgun.payload));
+      assert.equal(outsideOgun.payload.code, "OUTSIDE_OGUN_STATE");
+      assert.equal(
+        await prisma.user.count({ where: { email: "phase1-outside-ogun@pics.ng" } }),
+        0,
+        "a registration outside Ogun must create no account",
+      );
+    },
+  },
+  {
+    name: "the public state list offers Ogun only",
+    run: async () => {
+      const states = await apiRequest("/auth/territories/states");
+      assert.equal(states.status, 200, JSON.stringify(states.payload));
+      const offered = states.payload.states as Array<{ id: string }>;
+      assert.ok(
+        offered.every((state) => state.id === OGUN_STATE_ID),
+        `the registration picker must not offer a state registration will refuse: ${JSON.stringify(offered)}`,
+      );
+    },
+  },
+  {
+    name: "NATIONAL, GEO_POLITICAL_ZONE and LGA cannot be assigned as command levels",
+    run: async () => {
+      // Features 001 and 003. A level above the state does not exist here, and
+      // LGA is reference data rather than a rung of authority.
+      for (const adminLevel of ["NATIONAL", "GEO_POLITICAL_ZONE", "LGA"]) {
+        const created = await apiRequest("/admin/users", {
+          method: "POST",
+          token: await login(superAdminEmail),
+          body: {
+            name: `Phase1 ${adminLevel} Admin`,
+            email: `phase1-${adminLevel.toLowerCase()}@pics.ng`,
+            password: "UnplaceableLevel123!",
+            adminLevel,
+            stateId: OGUN_STATE_ID,
+          },
+        });
+        assert.equal(created.status, 400, `${adminLevel} must be refused: ${JSON.stringify(created.payload)}`);
+        assert.equal(
+          await prisma.user.count({ where: { email: `phase1-${adminLevel.toLowerCase()}@pics.ng` } }),
+          0,
+          `${adminLevel} must create no operator the command model cannot place`,
+        );
+      }
+    },
+  },
+  {
     name: "RBAC matrix enforces own, subordinate, peer, superior, specialist, and LGA boundaries",
     run: async () => {
       const own = await resolveOperationalTerritory(prisma, { stateId: OGUN_STATE_ID, pollingUnitId: branches[0].pollingUnitId });
@@ -658,6 +715,9 @@ async function setup() {
     throw new Error("Phase 1 test server did not start.");
   }
   baseUrl = `http://127.0.0.1:${address.port}`;
+  const referenceLga = await prisma.lGA.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { id: "asc" } });
+  assert.ok(referenceLga, "Ogun LGA reference data must be imported before this suite.");
+  lgaId = referenceLga.id;
   await createCommandHierarchy();
   await createTargetFixtures();
   await createLegacyFixtures();

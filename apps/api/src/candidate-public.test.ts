@@ -69,10 +69,9 @@ async function createCandidateFixture(token: string, suffix: string, officeType:
       email,
       password: "TestCandidate123!",
       officeType,
-      geoPoliticalZoneId: "seed-zone-south-west",
-      stateId: "seed-state-lagos",
-      ...(officeType === "CHAIRMANSHIP" ? { lgaId: "seed-lga-ikeja" } : {}),
-      ...(officeType === "COUNCILLOR" ? { lgaId: "seed-lga-ikeja", wardId: "seed-ward-ikeja-ward-a" } : {}),
+      stateId: "ng-state-ogun",
+      ...(officeType === "CHAIRMANSHIP" ? { lgaId: ogunLgaId } : {}),
+      ...(officeType === "COUNCILLOR" ? { lgaId: ogunLgaId, wardId: ogunWardId } : {}),
     },
   });
   assert.equal(created.status, 201);
@@ -83,7 +82,7 @@ const cases: Case[] = [
   {
     name: "candidate can update own public profile",
     run: async () => {
-      const token = await login("candidate@pics.ng", "Candidate123!");
+      const token = await login(SUITE_CANDIDATE.email, SUITE_CANDIDATE.password);
       const updated = await apiRequest("/candidate/profile", {
         method: "PATCH",
         token,
@@ -135,7 +134,7 @@ const cases: Case[] = [
   {
     name: "public candidate profile shows only published materials",
     run: async () => {
-      const token = await login("candidate@pics.ng", "Candidate123!");
+      const token = await login(SUITE_CANDIDATE.email, SUITE_CANDIDATE.password);
 
       const profile = await apiRequest("/candidate/profile", {
         method: "PATCH",
@@ -208,7 +207,7 @@ const cases: Case[] = [
         },
       });
 
-      const filtered = await apiRequest("/candidate/public?officeType=CHAIRMANSHIP&stateId=seed-state-lagos&search=Public");
+      const filtered = await apiRequest("/candidate/public?officeType=CHAIRMANSHIP&stateId=ng-state-ogun&search=Public");
       assert.equal(filtered.status, 200);
       const candidates = filtered.payload.candidates as Array<{ officeType?: string }>;
       assert.ok(candidates.length >= 1);
@@ -218,7 +217,7 @@ const cases: Case[] = [
   {
     name: "public candidate profile shows only published upcoming events",
     run: async () => {
-      const token = await login("candidate@pics.ng", "Candidate123!");
+      const token = await login(SUITE_CANDIDATE.email, SUITE_CANDIDATE.password);
       const profile = await apiRequest("/candidate/profile", { token });
       assert.equal(profile.status, 200, JSON.stringify(profile.payload));
       const candidateUserId = readProfileUserId(profile.payload);
@@ -259,8 +258,8 @@ const cases: Case[] = [
   {
     name: "voter sees only published in-scope events and can RSVP",
     run: async () => {
-      const token = await login("candidate@pics.ng", "Candidate123!");
-      const voterToken = await login("voter@pics.ng", "Voter123!");
+      const token = await login(SUITE_CANDIDATE.email, SUITE_CANDIDATE.password);
+      const voterToken = await login(SUITE_MEMBER.email, SUITE_MEMBER.password);
 
       const event = await apiRequest("/candidate/events", {
         method: "POST",
@@ -295,7 +294,91 @@ const cases: Case[] = [
   },
 ];
 
+/**
+ * Resolved from reference data rather than hardcoded. Ogun's LGAs and wards come
+ * from the authoritative import, so a fixed id here is a guess about what the
+ * import produced — and it broke the moment the seed stopped inventing its own.
+ */
+let ogunLgaId = "";
+let ogunWardId = "";
+let ogunPollingUnitId = "";
+
+async function resolveOgunTerritory() {
+  const lga = await prisma.lGA.findFirst({ where: { stateId: "ng-state-ogun" }, orderBy: { name: "asc" } });
+  if (!lga) {
+    throw new Error("No Ogun LGA is present; reference data must be loaded before this suite.");
+  }
+  ogunLgaId = lga.id;
+  const ward = await prisma.ward.findFirst({
+    where: { stateId: "ng-state-ogun", lgaId: lga.id },
+    orderBy: { name: "asc" },
+  });
+  if (!ward) {
+    throw new Error("No Ogun ward is present; reference data must be loaded before this suite.");
+  }
+  ogunWardId = ward.id;
+  const pollingUnit = await prisma.pollingUnit.findFirst({
+    where: { stateId: "ng-state-ogun", wardId: ward.id },
+    orderBy: { name: "asc" },
+  });
+  if (!pollingUnit) {
+    throw new Error("No Ogun polling unit is present; reference data must be loaded before this suite.");
+  }
+  ogunPollingUnitId = pollingUnit.id;
+}
+
+const SUITE_CANDIDATE = { email: "candidate-public-owner@pics.ng", password: "Candidate123!" };
+const SUITE_MEMBER = { email: "candidate-public-member@pics.ng", password: "Voter123!" };
+
+/**
+ * The suite provisions the candidate and member it signs in as.
+ *
+ * These were seeded personas until the product stopped fabricating people. The
+ * candidate is created through the admin API — which is how a candidate is
+ * actually created — and the member through public registration, so both follow
+ * the paths the platform really uses.
+ */
+async function createSuitePersonas() {
+  const adminToken = await login("superadmin@pics.ng", "ChangeMe123!");
+  createdUserEmails.add(SUITE_CANDIDATE.email);
+  const candidate = await apiRequest("/admin/candidates", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      name: "Candidate Public Owner",
+      email: SUITE_CANDIDATE.email,
+      password: SUITE_CANDIDATE.password,
+      officeType: "GOVERNORSHIP",
+      politicalPartyId: "seed-party-independent-alliance",
+      stateId: "ng-state-ogun",
+    },
+  });
+  assert.equal(candidate.status, 201, JSON.stringify(candidate.payload));
+
+  createdUserEmails.add(SUITE_MEMBER.email);
+  const member = await apiRequest("/auth/register-voter", {
+    method: "POST",
+    body: {
+      fullName: "Candidate Public Member",
+      email: SUITE_MEMBER.email,
+      phone: "08039990101",
+      password: SUITE_MEMBER.password,
+      voterCardNumber: `VIN-CANDIDATE-PUBLIC-${Date.now()}`,
+      stateId: "ng-state-ogun",
+      lgaId: ogunLgaId,
+      wardId: ogunWardId,
+      pollingUnitId: ogunPollingUnitId,
+      acceptTerms: true,
+      acceptPrivacy: true,
+      contactConsent: true,
+      confirmAdult: true,
+    },
+  });
+  assert.equal(member.status, 201, JSON.stringify(member.payload));
+}
+
 async function setup() {
+  await resolveOgunTerritory();
   server = http.createServer(createApp());
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
 
@@ -305,6 +388,7 @@ async function setup() {
   }
 
   baseUrl = `http://127.0.0.1:${address.port}`;
+  await createSuitePersonas();
 }
 
 async function teardown() {

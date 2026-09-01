@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-type AccessKey = "VOTER" | "ADMIN" | "CANDIDATE" | "AGENT";
+type AccessKey = "VOTER" | "REGISTER" | "POLLING_UNIT";
 
 type AccessCard = {
   key: AccessKey;
@@ -17,30 +17,23 @@ const accessCards: AccessCard[] = [
   {
     key: "VOTER",
     href: "/login",
-    title: "Voter Login",
-    description: "Referral rewards and voter account access",
-    icon: "V",
+    title: "Sign In",
+    description: "Members, coordinators, field agents and command staff",
+    icon: "S",
   },
   {
-    key: "ADMIN",
-    href: "/admin/login",
-    title: "Admin Login",
-    description: "System administration and management",
-    icon: "A",
+    key: "REGISTER",
+    href: "/register",
+    title: "Register",
+    description: "Create a member account in Ogun State",
+    icon: "R",
   },
   {
-    key: "CANDIDATE",
-    href: "/candidate/login",
-    title: "Candidate Login",
-    description: "Campaign management portal",
-    icon: "C",
-  },
-  {
-    key: "AGENT",
-    href: "/agent/login",
-    title: "Agent Login",
-    description: "Field agent operations dashboard",
-    icon: "G",
+    key: "POLLING_UNIT",
+    href: "/polling-units",
+    title: "Find Polling Unit",
+    description: "Confirm your polling unit location",
+    icon: "P",
   },
 ];
 

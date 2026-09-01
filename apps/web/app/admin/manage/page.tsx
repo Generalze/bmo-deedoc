@@ -7,6 +7,7 @@ import type { AuthUserProfile, ManagedUserItem } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchManagedUsers } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
+import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminManagePage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -15,9 +16,9 @@ export default function AdminManagePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -31,7 +32,11 @@ export default function AdminManagePage() {
         setManagedUsers(users);
       })
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAdminToken");
+        // Only a real authentication failure clears the session. A 403 means this
+        // screen is above the operator's role, not that they are signed out.
+        if (caughtError instanceof ApiError && caughtError.status === 401) {
+          clearSession();
+        }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load management overview.");
       })
       .finally(() => setLoading(false));
@@ -53,7 +58,7 @@ export default function AdminManagePage() {
         <section className="panel card">
           <h1>Unable to load management workspace</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
@@ -72,7 +77,7 @@ export default function AdminManagePage() {
         <p>Authority is scoped to {describeTerritory(user.adminProfile || emptyTerritorySummary())}. Choose a territory first, then move into focused user workflows.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <section className="grid stats">
         <article className="panel card">

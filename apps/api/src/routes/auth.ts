@@ -8,12 +8,12 @@ import {
   VoterVerificationStatus,
 } from "@prisma/client";
 import { z } from "zod";
-import { normalizeEmail } from "@pics-nigeria/shared";
+import { OGUN_STATE_ID, normalizeEmail } from "@pics-nigeria/shared";
 import { signAccessToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
-import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
+import { syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
@@ -189,17 +189,21 @@ router.patch("/me", requireAuth, async (request, response) => {
   });
 });
 
+/**
+ * States offered to the public registration form.
+ *
+ * Feature 001: Ogun only. This used to backfill and return all 37 states, which
+ * invited a registration the endpoint would then refuse — and the backfill
+ * itself could crash the process. The national reference set still exists for
+ * reporting and INEC alignment; it is simply not what a registrant chooses from.
+ */
 router.get("/territories/states", async (_request, response) => {
-  if ((await prisma.state.count()) < 37) {
-    await ensureNationalReferenceStates(prisma);
-  }
-
-  const states = await prisma.state.findMany({
-    orderBy: { name: "asc" },
+  const ogun = await prisma.state.findUnique({
+    where: { id: OGUN_STATE_ID },
     select: { id: true, name: true },
   });
 
-  return response.json({ states });
+  return response.json({ states: ogun ? [ogun] : [] });
 });
 
 router.get("/territories/lgas", async (request, response) => {
@@ -328,6 +332,17 @@ router.post("/register-voter", async (request, response) => {
   if (parsed.data.confirmAdult === false) {
     return response.status(400).json({
       message: "You must confirm that you are 18 years or older to register.",
+    });
+  }
+
+  // Feature 001: the platform is purpose-built for Ogun State. Enforced on the
+  // server because a client-side picker is a convenience, not a boundary — the
+  // endpoint is public and unauthenticated, so anything it will accept is
+  // reachable by anyone regardless of what the form offers.
+  if (parsed.data.stateId !== OGUN_STATE_ID) {
+    return response.status(400).json({
+      message: "This platform operates in Ogun State only. Registration outside Ogun State is not available.",
+      code: "OUTSIDE_OGUN_STATE",
     });
   }
 

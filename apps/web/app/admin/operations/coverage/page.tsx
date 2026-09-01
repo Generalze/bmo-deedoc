@@ -6,6 +6,7 @@ import type { AuthUserProfile, CoverageInsights } from "@pics-nigeria/shared";
 import { ApiError, fetchAdminCoverageInsights, fetchCurrentUser, updateStateAgentTarget } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import { readSession } from "../../../../lib/session";
 
 export default function AdminCoveragePage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -67,9 +68,9 @@ export default function AdminCoveragePage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -92,7 +93,7 @@ export default function AdminCoveragePage() {
   }, []);
 
   async function handleStateTargetSave(stateId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !insights) {
       setError("Authentication is required.");
       return;
@@ -165,7 +166,7 @@ export default function AdminCoveragePage() {
         <p className="muted">Coverage totals are restricted to your current authority. State and LGA inventory is authoritative. Ward, polling-unit, and staffing totals remain provisional until the full polling-unit reference dataset is loaded for this scope.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
       {insights.scopeWarning ? <p className="muted">{insights.scopeWarning}</p> : null}

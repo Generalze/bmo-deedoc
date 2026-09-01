@@ -28,18 +28,8 @@ import {
 } from "../../../lib/api";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { VoiceCallPanel } from "../../../components/voice-call-panel";
+import { readSession } from "../../../lib/session";
 
-const tokenKeys = ["picsNigeriaAdminToken", "picsNigeriaAgentToken", "picsNigeriaCandidateToken"];
-
-function readToken() {
-  for (const key of tokenKeys) {
-    const token = localStorage.getItem(key);
-    if (token) {
-      return token;
-    }
-  }
-  return null;
-}
 
 function pct(value: number) {
   return `${Math.max(0, Math.min(100, value))}%`;
@@ -111,7 +101,7 @@ export default function ElectionSituationRoomPage() {
   }
 
   useEffect(() => {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -126,7 +116,7 @@ export default function ElectionSituationRoomPage() {
   }, []);
 
   useEffect(() => {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       return;
     }
@@ -137,7 +127,7 @@ export default function ElectionSituationRoomPage() {
   }, [reportDate]);
 
   useEffect(() => {
-    const token = readToken();
+    const token = readSession();
     if (!token || !selectedConversationId) {
       setMessages([]);
       return;
@@ -156,7 +146,7 @@ export default function ElectionSituationRoomPage() {
   );
 
   async function refreshFromAction(message: string) {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       return;
     }
@@ -165,7 +155,7 @@ export default function ElectionSituationRoomPage() {
   }
 
   async function handleReconcileAlerts() {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -182,7 +172,7 @@ export default function ElectionSituationRoomPage() {
   }
 
   async function handleAlertStatus(alertId: string, nextStatus: "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED") {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -199,7 +189,7 @@ export default function ElectionSituationRoomPage() {
   }
 
   async function openDirectChat(unit: ElectionDayPollingUnitStatus) {
-    const token = readToken();
+    const token = readSession();
     if (!token || !unit.coordinatorUserId) {
       setFeedback({ tone: "error", message: "This Polling Unit has no assigned coordinator to message." });
       return;
@@ -221,7 +211,7 @@ export default function ElectionSituationRoomPage() {
   }
 
   async function requestCheckIn(unit: ElectionDayPollingUnitStatus) {
-    const token = readToken();
+    const token = readSession();
     if (!token || !unit.coordinatorUserId) {
       setFeedback({ tone: "error", message: "This Polling Unit has no assigned coordinator to message." });
       return;
@@ -248,7 +238,7 @@ export default function ElectionSituationRoomPage() {
 
   async function createTerritoryChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = readToken();
+    const token = readSession();
     if (!token || !status) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;
@@ -271,7 +261,7 @@ export default function ElectionSituationRoomPage() {
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = readToken();
+    const token = readSession();
     if (!token || !selectedConversationId || !messageDraft.trim()) {
       return;
     }
@@ -324,7 +314,7 @@ export default function ElectionSituationRoomPage() {
             <span>Operating date</span>
             <input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
           </label>
-          <button className="button" type="button" disabled={busy} onClick={() => void loadPage(readToken() || "", reportDate)}>
+          <button className="button" type="button" disabled={busy} onClick={() => void loadPage(readSession() || "", reportDate)}>
             Refresh
           </button>
           <button className="button secondary" type="button" disabled={busy} onClick={() => void handleReconcileAlerts()}>

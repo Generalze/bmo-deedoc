@@ -23,6 +23,7 @@ import {
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
+import { clearSession, readSession } from "../../../lib/session";
 
 type DashboardData = {
   user: AuthUserProfile;
@@ -56,7 +57,7 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState("");
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -65,21 +66,25 @@ export default function AdminDashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAdminToken");
-    window.location.href = "/admin/login";
+    clearSession();
+    window.location.href = "/login";
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
     loadDashboard(token)
       .then(setData)
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAdminToken");
+        // Only a real authentication failure clears the session. A 403 means this
+        // screen is above the operator's role, not that they are signed out.
+        if (caughtError instanceof ApiError && caughtError.status === 401) {
+          clearSession();
+        }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load the admin dashboard.");
       })
       .finally(() => setLoading(false));
@@ -107,7 +112,7 @@ export default function AdminDashboardPage() {
         <section className="panel card">
           <h1>Unable to load dashboard</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
@@ -129,7 +134,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      <AdminNav />
+      <AdminNav role={data?.user.role} />
 
       <section className="grid stats">
         <article className="panel card">

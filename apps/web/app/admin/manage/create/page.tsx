@@ -40,6 +40,7 @@ import {
 } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import { readSession } from "../../../../lib/session";
 
 type ManagedRole = "ADMIN" | "CANDIDATE" | "AGENT";
 type PageMode = "create" | "edit";
@@ -124,10 +125,18 @@ export default function AdminManageCreatePage() {
   });
 
   const manageableAdminLevels = useMemo(() => {
+    // Features 001 and 003: the platform is Ogun-only and LGA is reference
+    // data, not a command level. NATIONAL and GEO_POLITICAL_ZONE describe a
+    // hierarchy above the state that no longer exists here, and LGA describes
+    // authority the constituency-first structure does not grant — offering any
+    // of the three creates an operator the command model cannot place.
+    const assignable = ADMIN_LEVELS.filter(
+      (level) => level !== "NATIONAL" && level !== "GEO_POLITICAL_ZONE" && level !== "LGA",
+    );
     if (!user?.adminProfile || user.role === "SUPER_ADMIN") {
-      return ADMIN_LEVELS;
+      return assignable;
     }
-    return ADMIN_LEVELS.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level]);
+    return assignable.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level]);
   }, [user]);
 
   const manageableCandidateOffices = useMemo(() => {
@@ -298,9 +307,9 @@ export default function AdminManageCreatePage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -310,7 +319,7 @@ export default function AdminManageCreatePage() {
   }, []);
 
   async function handleSave() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -420,7 +429,7 @@ export default function AdminManageCreatePage() {
         <p>Authority scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
 
@@ -493,7 +502,7 @@ export default function AdminManageCreatePage() {
           <label className="field">
             <span>State</span>
             <select value={role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId} onChange={async (event) => {
-              const token = localStorage.getItem("picsNigeriaAdminToken");
+              const token = readSession();
               if (!token) { return; }
               const stateId = event.target.value;
               await refreshLookups(token, stateId);
@@ -509,7 +518,7 @@ export default function AdminManageCreatePage() {
           <label className="field">
             <span>Senatorial district</span>
             <select value={role === "ADMIN" ? adminForm.senatorialDistrictId : role === "CANDIDATE" ? candidateForm.senatorialDistrictId : agentForm.senatorialDistrictId} onChange={async (event) => {
-              const token = localStorage.getItem("picsNigeriaAdminToken");
+              const token = readSession();
               if (!token) { return; }
               const value = event.target.value;
               const currentStateId = role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId;
@@ -538,7 +547,7 @@ export default function AdminManageCreatePage() {
           <label className="field">
             <span>LGA</span>
             <select value={role === "ADMIN" ? adminForm.lgaId : role === "CANDIDATE" ? candidateForm.lgaId : agentForm.lgaId} onChange={async (event) => {
-              const token = localStorage.getItem("picsNigeriaAdminToken");
+              const token = readSession();
               if (!token) { return; }
               const value = event.target.value;
               const currentStateId = role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId;
@@ -568,7 +577,7 @@ export default function AdminManageCreatePage() {
             <span>Ward</span>
             <select value={role === "ADMIN" ? adminForm.wardId : role === "CANDIDATE" ? candidateForm.wardId : agentForm.wardId} onChange={async (event) => {
               const value = event.target.value;
-              const token = localStorage.getItem("picsNigeriaAdminToken");
+              const token = readSession();
               const currentStateId = role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId;
               const currentLgaId = role === "ADMIN" ? adminForm.lgaId : role === "CANDIDATE" ? candidateForm.lgaId : agentForm.lgaId;
               if (token && currentStateId && currentLgaId) {

@@ -19,6 +19,7 @@ import {
   describeTerritory,
   getManagedRoleLabel,
 } from "../../../../components/admin-management-utils";
+import { clearSession, readSession } from "../../../../lib/session";
 
 export default function AdminManageUsersPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -67,9 +68,9 @@ export default function AdminManageUsersPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -85,14 +86,18 @@ export default function AdminManageUsersPage() {
 
     loadPage(token, nextLocator)
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAdminToken");
+        // Only a real authentication failure clears the session. A 403 means this
+        // screen is above the operator's role, not that they are signed out.
+        if (caughtError instanceof ApiError && caughtError.status === 401) {
+          clearSession();
+        }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load scoped users.");
       })
       .finally(() => setLoading(false));
   }, []);
 
   async function handleToggleUser(userId: string, nextIsActive: boolean) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -110,7 +115,7 @@ export default function AdminManageUsersPage() {
   }
 
   async function handleDeleteUser(item: ManagedUserItem) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -128,7 +133,7 @@ export default function AdminManageUsersPage() {
   }
 
   async function handleRevokeAgentSession(item: ManagedUserItem) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -181,7 +186,7 @@ export default function AdminManageUsersPage() {
         <section className="panel card">
           <h1>Unable to load users</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
@@ -195,7 +200,7 @@ export default function AdminManageUsersPage() {
         <p>Visible scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <FeedbackBanner tone="error" message={error} />
       <FeedbackBanner tone="success" message={message} />

@@ -39,14 +39,14 @@ async function main() {
   console.log("voter_email=voter@pics.ng");
   console.log("voter_password=Voter123!");
   console.log("starter_territories:");
-  console.log("state=seed-state-lagos");
-  console.log("senatorialDistrict=seed-senatorial-lagos-central");
-  console.log("federalConstituency=seed-fed-ikeja");
-  console.log("lga=seed-lga-ikeja");
-  console.log("wardA=seed-ward-ikeja-ward-a");
-  console.log("wardB=seed-ward-ikeja-ward-b");
-  console.log("stateConstituency=seed-state-const-ikeja-1");
-  console.log("pollingUnit=seed-pu-ikeja-001");
+  console.log("state=ng-state-ogun");
+  console.log("senatorialDistrict=seed-senatorial-ogun-central");
+  console.log("federalConstituency=seed-fed-abeokuta-south");
+  console.log("lga=seed-lga-abeokuta-south");
+  console.log("wardA=seed-ward-abeokuta-south-a");
+  console.log("wardB=seed-ward-abeokuta-south-b");
+  console.log("stateConstituency=seed-state-const-abeokuta-south-1");
+  console.log("pollingUnit=seed-pu-abeokuta-south-001");
 }
 
 main().finally(async () => {

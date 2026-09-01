@@ -79,11 +79,32 @@ import { getRewardBalance } from "../lib/rewards";
 
 const router = Router();
 
+/**
+ * Admin levels the Ogun command structure can actually place.
+ *
+ * Features 001 and 003: NATIONAL and GEO_POLITICAL_ZONE describe a hierarchy
+ * above the state that this platform does not have, and LGA is reference data
+ * for reporting and INEC alignment rather than a rung of command authority.
+ * Enforced on the server because the create-user form filtering these out is a
+ * convenience — the endpoint is what decides who can exist.
+ */
+const ASSIGNABLE_ADMIN_LEVELS = [
+  AdminLevel.STATE,
+  AdminLevel.SENATORIAL,
+  AdminLevel.FEDERAL_CONSTITUENCY,
+  AdminLevel.STATE_CONSTITUENCY,
+  AdminLevel.WARD,
+] as const;
+
+const assignableAdminLevel = z.enum(ASSIGNABLE_ADMIN_LEVELS.map(String) as [string, ...string[]]).transform(
+  (value) => value as AdminLevel,
+);
+
 const adminCreationSchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().email(),
   password: z.string().min(8),
-  adminLevel: z.nativeEnum(AdminLevel),
+  adminLevel: assignableAdminLevel,
   politicalPartyId: z.string().trim().optional(),
   geoPoliticalZoneId: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
@@ -165,7 +186,7 @@ const agentCreationSchema = z.object({
 
 const adminUpdateSchema = z.object({
   name: z.string().trim().min(2),
-  adminLevel: z.nativeEnum(AdminLevel),
+  adminLevel: assignableAdminLevel,
   politicalPartyId: z.string().trim().optional(),
   geoPoliticalZoneId: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
@@ -2206,8 +2227,16 @@ router.get("/states", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     return response.status(400).json({ message: "Invalid state lookup query.", errors: parsed.error.flatten() });
   }
 
+  // Feature 004 keeps the national reference set for reporting and INEC
+  // alignment, so this lookup stays — but backfilling it must not decide
+  // whether the endpoint answers, and it must not be able to take the process
+  // down the way the public registration route could.
   if ((await prisma.state.count()) < 37) {
-    await ensureNationalReferenceStates(prisma);
+    try {
+      await ensureNationalReferenceStates(prisma);
+    } catch (error) {
+      console.error("Reference state backfill failed; serving stored states.", error);
+    }
   }
 
   const actor = request.authUser;
