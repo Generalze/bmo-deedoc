@@ -19,9 +19,10 @@ import {
 import { z } from "zod";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import {
+  buildOperationalPollingUnitTerritoryWhere,
   buildOperationalVoterProfileTerritoryWhere,
-  MEMBER_TERRITORY_SCOPE_VERSION,
-  snapshotScopeVersion,
+  selectCurrentMemberTerritorySnapshots,
+  SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
 } from "../lib/member-territory-scope";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
@@ -102,21 +103,12 @@ function coordinatorWhereFor(level: DashboardLevel, territoryId: string): Prisma
   }
 }
 
+/**
+ * Polling units answer to the same operational predicate as members, so a
+ * constituency cannot show polling units it will not place members in.
+ */
 function pollingUnitWhereFor(level: DashboardLevel, territoryId: string): Prisma.PollingUnitWhereInput {
-  switch (level) {
-    case "STATE":
-      return { stateId: territoryId };
-    case "SENATORIAL_DISTRICT":
-      return { ward: { stateConstituency: { federalConstituency: { senatorialDistrictId: territoryId } } } };
-    case "FEDERAL_CONSTITUENCY":
-      return { ward: { stateConstituency: { federalConstituencyId: territoryId } } };
-    case "STATE_CONSTITUENCY":
-      return { ward: { stateConstituencyId: territoryId } };
-    case "WARD":
-      return { wardId: territoryId };
-    case "POLLING_UNIT":
-      return { id: territoryId };
-  }
+  return buildOperationalPollingUnitTerritoryWhere(level, territoryId);
 }
 
 async function territoryNameFor(level: DashboardLevel, territoryId: string): Promise<string | null> {
@@ -275,12 +267,10 @@ async function strengthFor(level: DashboardLevel, territoryId: string, counts: L
   const candidateSnapshots = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: level, territoryId },
     orderBy: { calculatedAt: "desc" },
-    take: 20,
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
     select: { score: true, breakdownJson: true },
   });
-  const snapshots = candidateSnapshots
-    .filter((snapshot) => snapshotScopeVersion(snapshot.breakdownJson) === MEMBER_TERRITORY_SCOPE_VERSION)
-    .slice(0, 2);
+  const snapshots = selectCurrentMemberTerritorySnapshots(candidateSnapshots, 2);
 
   if (snapshots.length > 0) {
     const latest = snapshots[0].score.toNumber();

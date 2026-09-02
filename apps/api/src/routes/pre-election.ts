@@ -20,6 +20,8 @@ import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import {
   buildOperationalVoterProfileTerritoryWhere,
   MEMBER_TERRITORY_SCOPE_VERSION,
+  selectCurrentMemberTerritorySnapshots,
+  SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   type MemberTerritoryLevel,
 } from "../lib/member-territory-scope";
 import { createAuditLog } from "../lib/audit";
@@ -2476,10 +2478,18 @@ router.post("/strength/snapshots/calculate", requireAuth, requireRole("SUPER_ADM
   }
 
   const score = totalWeight.greaterThan(0) ? weightedScore.div(totalWeight).toDecimalPlaces(4) : new Prisma.Decimal(0);
-  const previousSnapshot = await prisma.territoryStrengthSnapshot.findFirst({
+  /**
+   * Trend compares like with like. The most recent snapshot may have been
+   * calculated under the old member scope, and reporting the difference between
+   * two calculation generations as a trend would announce an improvement that
+   * only reflects a change in how the number is derived.
+   */
+  const previousCandidates = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId, candidateId: parsed.data.candidateId || null },
     orderBy: { calculatedAt: "desc" },
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   });
+  const previousSnapshot = selectCurrentMemberTerritorySnapshots(previousCandidates, 1)[0] || null;
   const snapshot = await prisma.territoryStrengthSnapshot.create({
     data: {
       territoryType: parsed.data.territoryType,
@@ -2517,11 +2527,18 @@ router.get("/strength/snapshots/latest", requireAuth, async (request, response) 
     return response.status(403).json({ message: "You do not have permission to view this territory." });
   }
 
-  const snapshots = await prisma.territoryStrengthSnapshot.findMany({
+  /**
+   * Only snapshots calculated under current member-scope semantics. An obsolete
+   * one is a historical record, not the territory's current strength, and
+   * presenting it here is what let this surface print 0 beside a command
+   * dashboard showing the correct score for the same territory.
+   */
+  const snapshotCandidates = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
     orderBy: { calculatedAt: "desc" },
-    take: 2,
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   });
+  const snapshots = selectCurrentMemberTerritorySnapshots(snapshotCandidates, 2);
   const latest = snapshots[0] || null;
 
   return response.json({
@@ -2585,7 +2602,7 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
     prisma.territoryStrengthSnapshot.findMany({
       where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
       orderBy: { calculatedAt: "desc" },
-      take: 2,
+      take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
     }),
     prisma.territoryTarget.findMany({
       where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
@@ -2674,10 +2691,13 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
   const childSummaries = await Promise.all(
     children.map(async (child) => {
       const [snapshot, verifiedMembers, registeredMembers] = await Promise.all([
-        prisma.territoryStrengthSnapshot.findFirst({
-          where: { territoryType: child.territoryType, territoryId: child.id },
-          orderBy: { calculatedAt: "desc" },
-        }),
+        prisma.territoryStrengthSnapshot
+          .findMany({
+            where: { territoryType: child.territoryType, territoryId: child.id },
+            orderBy: { calculatedAt: "desc" },
+            take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
+          })
+          .then((rows) => selectCurrentMemberTerritorySnapshots(rows, 1)[0] || null),
         calculateMetricActual(child.territoryType, child.id, "VERIFIED_MEMBERS"),
         calculateMetricActual(child.territoryType, child.id, "REGISTERED_MEMBERS"),
       ]);
@@ -2693,7 +2713,8 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
     }),
   );
 
-  const latest = latestSnapshots[0] || null;
+  const compatibleSnapshots = selectCurrentMemberTerritorySnapshots(latestSnapshots, 2);
+  const latest = compatibleSnapshots[0] || null;
   return response.json({
     dashboard: {
       territoryType: parsed.data.territoryType,

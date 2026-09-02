@@ -11,7 +11,12 @@ import {
   validateIdentityRelease,
   validateManifest,
 } from "../../../packages/database/scripts/import-ogun-reference-release";
-import { MEMBER_TERRITORY_SCOPE_VERSION } from "./lib/member-territory-scope";
+import {
+  buildOperationalPollingUnitTerritoryWhere,
+  buildOperationalVoterProfileTerritoryWhere,
+  MEMBER_TERRITORY_SCOPE_VERSION,
+  UnsupportedMemberTerritoryType,
+} from "./lib/member-territory-scope";
 import { runMemberAncestryBackfill } from "../../../packages/database/scripts/backfill-member-ancestry";
 import { hashPassword } from "./auth/password";
 import { createApp } from "./app";
@@ -852,6 +857,252 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
         await prisma.territoryStrengthSnapshot.delete({ where: { id: accepted.id } });
       } finally {
         await prisma.territoryStrengthSnapshot.deleteMany({ where: { id: { in: [stale.id, current.id] } } });
+      }
+    },
+  },
+  {
+    name: "polling-unit counts follow the same operational edge rule as member counts",
+    run: async () => {
+      // F-b. A constituency must not show polling units it will not place a
+      // member in; the derived strength score divides one by the other.
+      const officerEmail = email("pu-scope-officer");
+      await prisma.user.create({
+        data: {
+          name: "Ancestry PU Scope Officer",
+          email: officerEmail,
+          passwordHash: await hashPassword(password),
+          role: "STATE_OFFICER",
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
+        },
+      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
+      const token = (session.payload as { token: string }).token;
+
+      // A real constituency whose every ward edge is inferred and unreviewed.
+      const wholly = await prisma.stateConstituency.findFirst({
+        where: {
+          stateId: OGUN_STATE_ID,
+          federalConstituencyId: { not: null },
+          wards: { some: { pollingUnits: { some: {} } }, every: { stateConstituencyEdgeInferred: true } },
+        },
+        orderBy: { id: "asc" },
+        select: { id: true, federalConstituency: { select: { id: true, senatorialDistrictId: true } } },
+      });
+      assert.ok(wholly, "the release must contain a constituency whose wards are all unreviewed inferences");
+
+      const pollingUnitsInGraph = await prisma.pollingUnit.count({ where: { ward: { stateConstituencyId: wholly.id } } });
+      assert.ok(pollingUnitsInGraph > 0, "that constituency must have polling units in the raw graph");
+
+      const tilesFor = async (level: string, territoryId: string) => {
+        const view = await apiRequest(`/dashboard?level=${level}&territoryId=${territoryId}`, { token });
+        assert.equal(view.status, 200, `${level}: ${JSON.stringify(view.payload)}`);
+        const tiles = (view.payload as { dashboard: { tiles: Array<{ key: string; value: number }> } }).dashboard.tiles;
+        return {
+          members: tiles.find((tile) => tile.key === "REGISTERED_MEMBERS")?.value ?? -1,
+          pollingUnits: tiles.find((tile) => tile.key === "POLLING_UNITS")?.value ?? -1,
+        };
+      };
+
+      for (const [level, territoryId] of [
+        ["STATE_CONSTITUENCY", wholly.id],
+        ["FEDERAL_CONSTITUENCY", wholly.federalConstituency!.id],
+        ["SENATORIAL_DISTRICT", wholly.federalConstituency!.senatorialDistrictId],
+      ] as const) {
+        const before = await tilesFor(level, territoryId);
+        if (level === "STATE_CONSTITUENCY") {
+          assert.equal(before.members, 0, "no member can be placed through an unreviewed edge");
+          assert.equal(
+            before.pollingUnits,
+            0,
+            "and no polling unit may be counted through it either, or the strength denominator disagrees with its numerator",
+          );
+        } else {
+          // Sibling wards may be sourced at the wider levels; the invariant is
+          // that the unreviewed constituency contributes nothing to either half.
+          assert.ok(before.pollingUnits >= 0);
+        }
+      }
+
+      // Reviewing the edges makes both halves visible together.
+      const wards = await prisma.ward.findMany({ where: { stateConstituencyId: wholly.id }, select: { id: true } });
+      await prisma.ward.updateMany({
+        where: { id: { in: wards.map((ward) => ward.id) } },
+        data: { stateConstituencyEdgeReviewedAt: new Date(), stateConstituencyEdgeReviewedBy: "pu-scope-test" },
+      });
+      try {
+        const after = await tilesFor("STATE_CONSTITUENCY", wholly.id);
+        assert.equal(
+          after.pollingUnits,
+          pollingUnitsInGraph,
+          "once reviewed, the constituency's polling units appear",
+        );
+      } finally {
+        await prisma.ward.updateMany({
+          where: { id: { in: wards.map((ward) => ward.id) } },
+          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+        });
+      }
+
+      const restored = await tilesFor("STATE_CONSTITUENCY", wholly.id);
+      assert.equal(restored.pollingUnits, 0, "and disappear again when the review is withdrawn");
+    },
+  },
+  {
+    name: "pre-election strength surfaces ignore an obsolete snapshot and accept a current one",
+    run: async () => {
+      // F-a. The command dashboard rejected these already; the pre-election
+      // surfaces displayed them, so the same territory read 0 in one place and
+      // its real score in another.
+      const officerEmail = email("pe-snapshot-officer");
+      await prisma.user.create({
+        data: {
+          name: "Ancestry Pre-Election Officer",
+          email: officerEmail,
+          passwordHash: await hashPassword(password),
+          role: "STATE_OFFICER",
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
+        },
+      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
+      const token = (session.payload as { token: string }).token;
+      const query = `territoryType=STATE_CONSTITUENCY&territoryId=${expected.stateConstituencyId}`;
+
+      const obsolete = await prisma.territoryStrengthSnapshot.create({
+        data: {
+          territoryType: "STATE_CONSTITUENCY",
+          territoryId: expected.stateConstituencyId,
+          score: new Prisma.Decimal(0),
+          breakdownJson: [{ metric: "REGISTERED_MEMBERS", actualValue: 0 }],
+          calculatedAt: new Date(),
+        },
+      });
+      try {
+        const latest = await apiRequest(`/pre-election/strength/snapshots/latest?${query}`, { token });
+        assert.equal(latest.status, 200, JSON.stringify(latest.payload));
+        assert.equal(
+          (latest.payload as { strengthSnapshot: unknown }).strengthSnapshot,
+          null,
+          "an unversioned snapshot must not be presented as the current strength",
+        );
+
+        const dash = await apiRequest(`/pre-election/strength/dashboard?${query}`, { token });
+        assert.equal(dash.status, 200, JSON.stringify(dash.payload));
+        assert.equal(
+          (dash.payload as { dashboard: { latestStrengthSnapshot: unknown } }).dashboard.latestStrengthSnapshot,
+          null,
+          "the strength dashboard must not present an obsolete snapshot either",
+        );
+
+        const current = await prisma.territoryStrengthSnapshot.create({
+          data: {
+            territoryType: "STATE_CONSTITUENCY",
+            territoryId: expected.stateConstituencyId,
+            score: new Prisma.Decimal(64),
+            breakdownJson: { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: [] },
+            calculatedAt: new Date(),
+          },
+        });
+        try {
+          const accepted = await apiRequest(`/pre-election/strength/snapshots/latest?${query}`, { token });
+          const payload = (accepted.payload as { strengthSnapshot: { score: string; trend: string | null } })
+            .strengthSnapshot;
+          assert.ok(payload, "a current-version snapshot must be accepted");
+          assert.equal(payload.score, "64");
+          /**
+           * This endpoint reports STABLE when there is nothing to compare
+           * against — its existing no-previous value. What matters is that the
+           * obsolete zero is not treated as a previous score: that would read
+           * as IMPROVING, an advance that never happened.
+           */
+          assert.notEqual(
+            payload.trend,
+            "IMPROVING",
+            "an obsolete snapshot must not be used as the previous score",
+          );
+          assert.equal(payload.trend, "STABLE", "with no comparable previous snapshot there is no trend");
+        } finally {
+          await prisma.territoryStrengthSnapshot.delete({ where: { id: current.id } });
+        }
+      } finally {
+        await prisma.territoryStrengthSnapshot.delete({ where: { id: obsolete.id } });
+      }
+    },
+  },
+  {
+    name: "trend compares only snapshots from the current calculation generation",
+    run: async () => {
+      const officerEmail = email("trend-officer");
+      await prisma.user.create({
+        data: {
+          name: "Ancestry Trend Officer",
+          email: officerEmail,
+          passwordHash: await hashPassword(password),
+          role: "STATE_OFFICER",
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
+        },
+      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
+      const token = (session.payload as { token: string }).token;
+      const query = `territoryType=STATE_CONSTITUENCY&territoryId=${expected.stateConstituencyId}`;
+
+      const made: string[] = [];
+      const snapshot = async (score: number, versioned: boolean, minutesAgo: number) => {
+        const row = await prisma.territoryStrengthSnapshot.create({
+          data: {
+            territoryType: "STATE_CONSTITUENCY",
+            territoryId: expected.stateConstituencyId,
+            score: new Prisma.Decimal(score),
+            breakdownJson: versioned
+              ? { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: [] }
+              : [{ metric: "REGISTERED_MEMBERS", actualValue: 0 }],
+            calculatedAt: new Date(Date.now() - minutesAgo * 60_000),
+          },
+        });
+        made.push(row.id);
+        return row;
+      };
+
+      const trend = async () => {
+        const result = await apiRequest(`/pre-election/strength/snapshots/latest?${query}`, { token });
+        assert.equal(result.status, 200, JSON.stringify(result.payload));
+        return (result.payload as { strengthSnapshot: { trend: string | null } | null }).strengthSnapshot?.trend ?? null;
+      };
+
+      try {
+        await snapshot(0, false, 30);
+        await snapshot(60, true, 20);
+        // STABLE is this endpoint's "nothing to compare against". The defect
+        // being guarded is the 0 -> 60 jump reading as IMPROVING.
+        assert.equal(await trend(), "STABLE", "a pre-version 0 must not manufacture an IMPROVING trend");
+
+        await snapshot(70, true, 10);
+        assert.equal(await trend(), "IMPROVING", "60 -> 70 across the current generation is a real improvement");
+
+        await snapshot(65, true, 5);
+        assert.equal(await trend(), "DECLINING", "70 -> 65 is a real decline");
+
+        await snapshot(65, true, 1);
+        assert.equal(await trend(), "STABLE", "65 -> 65 is stable");
+      } finally {
+        await prisma.territoryStrengthSnapshot.deleteMany({ where: { id: { in: made } } });
+      }
+    },
+  },
+  {
+    name: "an unknown territory type fails closed rather than scoping to everything",
+    run: async () => {
+      // A scoping authority that returns undefined reaches Prisma as
+      // `where: undefined`, which counts every row in the table.
+      for (const build of [buildOperationalVoterProfileTerritoryWhere, buildOperationalPollingUnitTerritoryWhere]) {
+        for (const bogus of ["LGA", "NATIONAL", "", "state_constituency"]) {
+          assert.throws(
+            () => build(bogus as never, "any-territory"),
+            UnsupportedMemberTerritoryType,
+            `${build.name} must refuse '${bogus}' rather than returning an unrestricted scope`,
+          );
+        }
+        const valid = build("STATE" as never, OGUN_STATE_ID);
+        assert.ok(valid && typeof valid === "object", "a supported level still returns a filter");
       }
     },
   },

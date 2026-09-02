@@ -171,12 +171,30 @@ WARD and POLLING_UNIT — those do not depend on the disputed edge — and is co
 at STATE_CONSTITUENCY, FEDERAL_CONSTITUENCY and SENATORIAL_DISTRICT only once the
 edge is reviewed.
 
+**Polling units follow the same rule.** `buildOperationalPollingUnitTerritoryWhere`
+applies the identical predicate, so a constituency cannot show polling units it
+will not place a member in. That matters beyond tidiness: the derived strength
+score divides coverage by polling units, so counting the two halves under
+different scopes produced a non-zero strength for a constituency with no
+placeable members.
+
 **Strength snapshots are scope-versioned.** New snapshots record
-`memberTerritoryScopeVersion` in their breakdown JSON; the dashboard ignores
-snapshots that do not carry the current version, falling back to its live derived
-score. Old snapshots are not rewritten — they record what was calculated at the
-time — but they can no longer override canonical ancestry, which is what let a
-pre-fix zero outlive the backfill that fixed the data.
+`memberTerritoryScopeVersion` in their breakdown JSON, and
+`selectCurrentMemberTerritorySnapshots` is the single rule every strength
+surface uses — the command dashboard, `GET /pre-election/strength/snapshots/latest`,
+`GET /pre-election/strength/dashboard` and its child roll-ups. A snapshot from an
+older generation is ignored and the surface falls back to its live calculation.
+Old snapshots are not rewritten: they record what was calculated at the time.
+
+**Trend compares like with like.** Trend is derived only from snapshots of the
+current generation. Comparing the first correct score against a pre-version zero
+would report `IMPROVING` for what is only a change in how the number is derived.
+
+**An unknown territory type fails closed.** Both helpers raise
+`UnsupportedMemberTerritoryType` rather than falling off the end of their switch.
+A scoping authority that returns `undefined` reaches Prisma as
+`count({ where: undefined })` — every row in the table — so an unrecognised level
+must refuse to answer rather than answer "everywhere".
 
 `scripts/verify-ancestry-authority.mjs` fails the build if the registration path
 regains a direct client-to-profile ancestry write, if the request contract

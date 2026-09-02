@@ -106,6 +106,43 @@ if (!scopeAuthority.includes("MEMBER_TERRITORY_SCOPE_VERSION")) {
   failures.push(`${SCOPE_AUTHORITY} no longer declares a scope version; stale snapshots could not be rejected.`);
 }
 
+/**
+ * The scope authority must refuse an unrecognised level rather than returning
+ * an unrestricted filter. `count({ where: undefined })` counts every row, so a
+ * scoping authority that falls through the end of a switch broadens access
+ * instead of narrowing it.
+ */
+if (!scopeAuthority.includes("UnsupportedMemberTerritoryType")) {
+  failures.push(`${SCOPE_AUTHORITY} has no fail-closed path for an unknown territory type.`);
+}
+if (!scopeAuthority.includes("buildOperationalPollingUnitTerritoryWhere")) {
+  failures.push(`${SCOPE_AUTHORITY} does not own polling-unit territory scope.`);
+}
+if (!scopeAuthority.includes("selectCurrentMemberTerritorySnapshots")) {
+  failures.push(`${SCOPE_AUTHORITY} does not own snapshot compatibility; each consumer would test the JSON itself.`);
+}
+
+/**
+ * Every strength surface must select snapshots through that one authority. The
+ * dashboard rejecting obsolete snapshots while the pre-election surfaces
+ * displayed them is exactly how the same territory came to show two different
+ * scores at the same moment.
+ */
+const SNAPSHOT_CONSUMERS = [
+  join("apps", "api", "src", "routes", "dashboard.ts"),
+  join("apps", "api", "src", "routes", "pre-election.ts"),
+];
+for (const consumer of SNAPSHOT_CONSUMERS) {
+  const source = readFileSync(join(repoRoot, consumer), "utf8");
+  const reads = (source.match(/territoryStrengthSnapshot\s*\.?\s*\n?\s*\.(findMany|findFirst)/g) || []).length;
+  const selections = (source.match(/selectCurrentMemberTerritorySnapshots/g) || []).length;
+  if (reads > 0 && selections < reads) {
+    failures.push(
+      `${consumer} reads TerritoryStrengthSnapshot ${reads} time(s) but routes only ${selections} through the shared compatibility authority.`,
+    );
+  }
+}
+
 for (const consumer of SCOPE_CONSUMERS) {
   const source = readFileSync(join(repoRoot, consumer), "utf8");
   if (!source.includes("buildOperationalVoterProfileTerritoryWhere")) {
@@ -122,6 +159,14 @@ for (const consumer of SCOPE_CONSUMERS) {
       failures.push(`${consumer} builds a private VoterProfile constituency scope on ${field}.`);
     }
   }
+}
+
+const DASHBOARD = join("apps", "api", "src", "routes", "dashboard.ts");
+const dashboardSource = readFileSync(join(repoRoot, DASHBOARD), "utf8");
+if (!dashboardSource.includes("buildOperationalPollingUnitTerritoryWhere")) {
+  failures.push(
+    `${DASHBOARD} does not scope polling units through the shared authority; its member and polling-unit counts could disagree about the same constituency.`,
+  );
 }
 
 /** The active identity release must carry inferred-edge provenance. */
@@ -146,4 +191,5 @@ if (failures.length > 0) {
 console.log(`ancestry_authority=${ANCESTRY_AUTHORITY.split(sep).join("/")}`);
 console.log(`ancestry_fields_guarded=${ANCESTRY_FIELDS.length}`);
 console.log(`ancestry_scope_consumers=${SCOPE_CONSUMERS.length}`);
+console.log(`ancestry_snapshot_consumers=${SNAPSHOT_CONSUMERS.length}`);
 console.log("ancestry_authority_integrity=ok");
