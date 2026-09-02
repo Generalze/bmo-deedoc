@@ -309,12 +309,24 @@ async function resolveOgunTerritory() {
     throw new Error("No Ogun LGA is present; reference data must be loaded before this suite.");
   }
   ogunLgaId = lga.id;
+  /**
+   * A ward whose State Constituency edge is usable, not merely the first one
+   * alphabetically. Registration refuses a ward whose edge is still an
+   * unreviewed inference, so a fixture ignoring that would register members the
+   * product itself would turn away.
+   */
   const ward = await prisma.ward.findFirst({
-    where: { stateId: "ng-state-ogun", lgaId: lga.id },
+    where: {
+      stateId: "ng-state-ogun",
+      lgaId: lga.id,
+      stateConstituencyEdgeInferred: false,
+      stateConstituency: { is: { federalConstituencyId: { not: null } } },
+      pollingUnits: { some: {} },
+    },
     orderBy: { name: "asc" },
   });
   if (!ward) {
-    throw new Error("No Ogun ward is present; reference data must be loaded before this suite.");
+    throw new Error("No Ogun ward with a reviewed constituency edge is present; reference data must be loaded before this suite.");
   }
   ogunWardId = ward.id;
   const pollingUnit = await prisma.pollingUnit.findFirst({

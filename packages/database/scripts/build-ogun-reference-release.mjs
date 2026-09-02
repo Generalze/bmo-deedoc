@@ -395,7 +395,25 @@ function toCsv(rows, columns) {
 }
 
 mkdirSync(outDir, { recursive: true });
+
+/**
+ * Inference rows are emitted in a stable order so regenerating an unchanged
+ * tree reproduces byte-identical output, and therefore an identical checksum.
+ * Insertion order here depends on Map iteration during matching, which is not
+ * something a release artefact should inherit.
+ */
+const inferenceKey = (row) => `${row.lga}\u0000${row.ward}\u0000${row.stateConstituency}`;
+const inferredRows = [...inferred].sort((a, b) => {
+  // Code-unit comparison, deliberately not localeCompare: collation is
+  // locale-dependent, and a release artefact must be byte-identical wherever it
+  // is regenerated.
+  const left = inferenceKey(a);
+  const right = inferenceKey(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+});
+
 const files = {
+  "INFERRED-EDGES.csv": toCsv(inferredRows, ["lga", "ward", "stateConstituency", "basis"]),
   "territories.csv": toCsv(territories, [
     "kind",
     "canonicalId",
@@ -416,7 +434,10 @@ const files = {
 const sha = {};
 for (const [name, content] of Object.entries(files)) {
   writeFileSync(path.join(outDir, name), content);
-  sha[name] = createHash("sha256").update(content).digest("hex");
+  // LF-canonical, matching how the importer verifies these checksums. Hashing
+  // raw bytes made a correct release fail on a Windows checkout and pass on a
+  // Linux one.
+  sha[name] = createHash("sha256").update(content.replace(/\r\n?/g, "\n"), "utf8").digest("hex");
 }
 
 const counts = {
@@ -446,16 +467,15 @@ writeFileSync(
         territories: { path: "territories.csv", sha256: sha["territories.csv"] },
         commandRelationships: { path: "command-relationships.csv", sha256: sha["command-relationships.csv"] },
         lgaMemberships: { path: "lga-memberships.csv", sha256: sha["lga-memberships.csv"] },
+        // Not optional for this release. A missing inferred-edge file does not
+        // mean "no edges were inferred"; it means the provenance is unknown,
+        // and importing it would silently mark 55 guesses as sourced.
+        inferredEdges: { path: "INFERRED-EDGES.csv", sha256: sha["INFERRED-EDGES.csv"] },
       },
     },
     null,
     2,
   ) + "\n",
-);
-
-writeFileSync(
-  path.join(outDir, "INFERRED-EDGES.csv"),
-  toCsv(inferred, ["lga", "ward", "stateConstituency", "basis"]),
 );
 
 console.log(JSON.stringify({ ...counts, inferredEdges: inferred.length, relationships: relationships.length, memberships: memberships.length, unmappedWards }, null, 2));

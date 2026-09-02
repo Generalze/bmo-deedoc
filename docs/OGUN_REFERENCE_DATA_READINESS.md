@@ -152,6 +152,38 @@ packages/database/reference/ogun/<release-id>/
   polling-unit-geodata.csv  # optional, independently approved
 ```
 
+## Inferred edge provenance
+
+55 of the 236 ward → State Constituency edges in `ogun-identity-2026-08-12` were
+resolved by inference rather than read from an authoritative source, and are
+listed in the release's `INFERRED-EDGES.csv` with the basis for each. The file
+holds 56 rows: ward `inec-ward-6511` appears twice because the build later moved
+it to a constituency that would otherwise have had no ward, and the earlier row
+was never retracted. The import uses the row matching the edge actually loaded.
+
+That distinction did not previously survive the import: the file was not listed
+in the manifest's checksummed `files` block, nothing read it at runtime, and
+`territories.csv` carried no column marking an edge as inferred, so all 236
+edges became indistinguishable once loaded.
+
+It is now machine-enforceable:
+
+- `INFERRED-EDGES.csv` is a checksummed manifest file, so the set cannot be
+  quietly shrunk to make an unreviewed edge look sourced.
+- `Ward.stateConstituencyEdgeInferred` / `stateConstituencyEdgeInferenceBasis`
+  record the inference and are **owned by the import**.
+- `Ward.stateConstituencyEdgeReviewedAt` / `stateConstituencyEdgeReviewedBy`
+  record human review and are **never written by the importer**, so re-importing
+  a release cannot revoke a completed review.
+
+**None of these edges is reviewed.** Member registration on those wards fails
+closed with `ANCESTRY_EDGE_UNREVIEWED`. Reviewing them is a data-governance
+action; loading an edge into the database does not make it true.
+
+Release file checksums are computed over LF-canonicalised bytes, matching the
+migration integrity manifest, so a correct release verifies identically on a
+Windows and a Linux checkout.
+
 `manifest.json` must record the publisher, source URL or document identifier, retrieval and effective dates, license/usage basis, reviewer approval, file SHA-256 values, declared record counts, source-code namespaces, and any superseded release. The declared Ward and Polling Unit totals become acceptance counts for that release; repository code must not guess totals that the source does not declare.
 
 The identity release contains stable canonical IDs, source codes, names and aliases, State ownership, reference LGA membership, and every direct command relationship. Canonical IDs remain unchanged across later releases; source renames become aliases or reviewed display-name changes. Duplicate canonical IDs, duplicate source codes within a namespace, unknown parents, cross-State links, orphan records, hierarchy cycles, and conflicting command parents fail the import.

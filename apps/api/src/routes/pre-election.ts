@@ -17,6 +17,15 @@ import { OGUN_STATE_ID, type OperationalTerritory } from "@pics-nigeria/shared";
 import { z } from "zod";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
+import {
+  buildOperationalPollingUnitTerritoryWhere,
+  buildOperationalVoterProfileTerritoryWhere,
+  isCurrentMemberTerritoryMetricSnapshot,
+  MEMBER_TERRITORY_SCOPE_VERSION,
+  selectCurrentMemberTerritorySnapshots,
+  SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
+  type MemberTerritoryLevel,
+} from "../lib/member-territory-scope";
 import { createAuditLog } from "../lib/audit";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
 import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
@@ -357,23 +366,17 @@ function decimalToString(value: Prisma.Decimal | number | string) {
   return new Prisma.Decimal(value).toFixed(2);
 }
 
+/**
+ * Member scope is not defined here.
+ *
+ * This used to filter on VoterProfile's nullable ancestry columns while the
+ * command dashboard filtered on the ward graph, so a strength score of zero
+ * could be written for a territory whose dashboard tile read four hundred — and
+ * because the dashboard prefers a snapshot over its live count, that zero then
+ * became what everyone saw. One authority now answers for both.
+ */
 function buildScopedVoterProfileWhere(territoryType: string, territoryId: string): Prisma.VoterProfileWhereInput {
-  if (territoryType === "STATE") {
-    return { stateId: territoryId };
-  }
-  if (territoryType === "SENATORIAL_DISTRICT") {
-    return { senatorialDistrictId: territoryId };
-  }
-  if (territoryType === "FEDERAL_CONSTITUENCY") {
-    return { federalConstituencyId: territoryId };
-  }
-  if (territoryType === "STATE_CONSTITUENCY") {
-    return { stateConstituencyId: territoryId };
-  }
-  if (territoryType === "WARD") {
-    return { wardId: territoryId };
-  }
-  return { pollingUnitId: territoryId };
+  return buildOperationalVoterProfileTerritoryWhere(territoryType as MemberTerritoryLevel, territoryId);
 }
 
 function buildScopedVerificationWhere(territoryType?: string, territoryId?: string): Prisma.VoterVerificationWhereInput {
@@ -683,24 +686,19 @@ async function calculateMetricActual(territoryType: string, territoryId: string,
     .then((snapshot) => snapshot?.actualValue || 0);
 }
 
+/**
+ * Polling units in scope, through the one operational authority.
+ *
+ * This used to walk `ward.stateConstituency` itself, without the reviewed-edge
+ * predicate the dashboard applies. That made the coverage denominator count
+ * polling units behind unreviewed inferred edges while the member metrics in the
+ * same snapshot excluded every member on those wards — and the snapshot was
+ * still stamped with the current scope version, certifying semantics it had not
+ * used. There is one definition now, and it lives in member-territory-scope.
+ */
 async function countPollingUnitsInScope(territoryType: string, territoryId: string) {
-  if (territoryType === "STATE") {
-    return prisma.pollingUnit.count({ where: { stateId: territoryId } });
-  }
-  if (territoryType === "WARD") {
-    return prisma.pollingUnit.count({ where: { wardId: territoryId } });
-  }
-  if (territoryType === "POLLING_UNIT") {
-    return prisma.pollingUnit.count({ where: { id: territoryId } });
-  }
-  if (territoryType === "STATE_CONSTITUENCY") {
-    return prisma.pollingUnit.count({ where: { ward: { stateConstituencyId: territoryId } } });
-  }
-  if (territoryType === "FEDERAL_CONSTITUENCY") {
-    return prisma.pollingUnit.count({ where: { ward: { stateConstituency: { federalConstituencyId: territoryId } } } });
-  }
   return prisma.pollingUnit.count({
-    where: { ward: { stateConstituency: { federalConstituency: { senatorialDistrictId: territoryId } } } },
+    where: buildOperationalPollingUnitTerritoryWhere(territoryType, territoryId),
   });
 }
 
@@ -2454,7 +2452,15 @@ router.post("/strength/snapshots/calculate", requireAuth, requireRole("SUPER_ADM
         metric: metricDefinition.metric,
         actualValue,
         calculatedAt: now,
-        metadataJson: { source: "PRE_ELECTION_API" },
+        /**
+         * Stamped with the member-scope semantics this value was calculated
+         * under, so a consumer can tell a current actual from one produced
+         * before member scope moved onto the ward graph.
+         */
+        metadataJson: {
+          source: "PRE_ELECTION_API",
+          memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION,
+        },
       },
     });
 
@@ -2477,17 +2483,31 @@ router.post("/strength/snapshots/calculate", requireAuth, requireRole("SUPER_ADM
   }
 
   const score = totalWeight.greaterThan(0) ? weightedScore.div(totalWeight).toDecimalPlaces(4) : new Prisma.Decimal(0);
-  const previousSnapshot = await prisma.territoryStrengthSnapshot.findFirst({
+  /**
+   * Trend compares like with like. The most recent snapshot may have been
+   * calculated under the old member scope, and reporting the difference between
+   * two calculation generations as a trend would announce an improvement that
+   * only reflects a change in how the number is derived.
+   */
+  const previousCandidates = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId, candidateId: parsed.data.candidateId || null },
     orderBy: { calculatedAt: "desc" },
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   });
+  const previousSnapshot = selectCurrentMemberTerritorySnapshots(previousCandidates, 1)[0] || null;
   const snapshot = await prisma.territoryStrengthSnapshot.create({
     data: {
       territoryType: parsed.data.territoryType,
       territoryId: parsed.data.territoryId,
       candidateId: parsed.data.candidateId || null,
       score,
-      breakdownJson: breakdown,
+      /**
+       * Stamped with the member-scope semantics this score was calculated
+       * under. The dashboard prefers a snapshot over its own live count, so an
+       * unversioned snapshot from before member scope moved onto the ward graph
+       * must be ignorable rather than authoritative forever.
+       */
+      breakdownJson: { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: breakdown },
       calculatedAt: now,
     },
   });
@@ -2512,11 +2532,18 @@ router.get("/strength/snapshots/latest", requireAuth, async (request, response) 
     return response.status(403).json({ message: "You do not have permission to view this territory." });
   }
 
-  const snapshots = await prisma.territoryStrengthSnapshot.findMany({
+  /**
+   * Only snapshots calculated under current member-scope semantics. An obsolete
+   * one is a historical record, not the territory's current strength, and
+   * presenting it here is what let this surface print 0 beside a command
+   * dashboard showing the correct score for the same territory.
+   */
+  const snapshotCandidates = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
     orderBy: { calculatedAt: "desc" },
-    take: 2,
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   });
+  const snapshots = selectCurrentMemberTerritorySnapshots(snapshotCandidates, 2);
   const latest = snapshots[0] || null;
 
   return response.json({
@@ -2546,11 +2573,24 @@ router.get("/strength/targets/progress", requireAuth, async (request, response) 
 
   const progress = await Promise.all(
     targets.map(async (target) => {
-      const latestSnapshot = await prisma.territoryMetricSnapshot.findFirst({
+      /**
+       * A stored actual is current only if it was calculated under the current
+       * member scope. An older one is a historical record, not this target's
+       * progress; where none exists the value is recomputed through the same
+       * `calculateMetricActual` path `/strength/dashboard` uses, so the two
+       * endpoints cannot disagree about the same target.
+       */
+      const metricSnapshots = await prisma.territoryMetricSnapshot.findMany({
         where: { territoryType: target.territoryType, territoryId: target.territoryId, metric: target.metric },
         orderBy: { calculatedAt: "desc" },
+        take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
       });
-      const actualValue = latestSnapshot?.actualValue || 0;
+      const compatibleSnapshot = metricSnapshots.find((snapshot) =>
+        isCurrentMemberTerritoryMetricSnapshot(snapshot),
+      );
+      const actualValue =
+        compatibleSnapshot?.actualValue ??
+        (await calculateMetricActual(target.territoryType, target.territoryId, target.metric));
       return {
         targetId: target.id,
         metric: target.metric,
@@ -2580,7 +2620,7 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
     prisma.territoryStrengthSnapshot.findMany({
       where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
       orderBy: { calculatedAt: "desc" },
-      take: 2,
+      take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
     }),
     prisma.territoryTarget.findMany({
       where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
@@ -2669,10 +2709,13 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
   const childSummaries = await Promise.all(
     children.map(async (child) => {
       const [snapshot, verifiedMembers, registeredMembers] = await Promise.all([
-        prisma.territoryStrengthSnapshot.findFirst({
-          where: { territoryType: child.territoryType, territoryId: child.id },
-          orderBy: { calculatedAt: "desc" },
-        }),
+        prisma.territoryStrengthSnapshot
+          .findMany({
+            where: { territoryType: child.territoryType, territoryId: child.id },
+            orderBy: { calculatedAt: "desc" },
+            take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
+          })
+          .then((rows) => selectCurrentMemberTerritorySnapshots(rows, 1)[0] || null),
         calculateMetricActual(child.territoryType, child.id, "VERIFIED_MEMBERS"),
         calculateMetricActual(child.territoryType, child.id, "REGISTERED_MEMBERS"),
       ]);
@@ -2688,7 +2731,15 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
     }),
   );
 
-  const latest = latestSnapshots[0] || null;
+  /**
+   * Score and trend both come from this list. Taking `latest` from the filtered
+   * snapshots and the comparand from the raw ones is how an obsolete zero
+   * became the "previous" score, reporting a change of calculation generation
+   * as campaign progress — and, with a genuine decline in between, inverting
+   * its sign.
+   */
+  const compatibleSnapshots = selectCurrentMemberTerritorySnapshots(latestSnapshots, 2);
+  const latest = compatibleSnapshots[0] || null;
   return response.json({
     dashboard: {
       territoryType: parsed.data.territoryType,
@@ -2698,7 +2749,7 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
             ...latest,
             score: latest.score.toString(),
             calculatedAt: latest.calculatedAt.toISOString(),
-            trend: trendFromScores(latest.score, latestSnapshots[1]?.score),
+            trend: trendFromScores(latest.score, compatibleSnapshots[1]?.score),
           }
         : null,
       targetProgress,

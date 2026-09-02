@@ -57,6 +57,10 @@ path-cited defect, not a difference of opinion:
    028, 030, 056.
 
 4. **Member constituency ancestry is never populated on the real write path.**
+   **[CLOSED in the P0 #4 branch — see `docs/MEMBER_ANCESTRY.md`. The code path
+   is implemented and the request contract no longer accepts caller-supplied
+   ancestry; operational completeness still waits on human review of the 56
+   inferred constituency edges.]**
    `VoterProfile.senatorialDistrictId` / `federalConstituencyId` /
    `stateConstituencyId` are nullable, the public registration form collects only
    State → LGA → Ward → PU, and `apps/api/src/routes/auth.ts` stores

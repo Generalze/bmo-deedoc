@@ -45,8 +45,21 @@ function claimParent(
   resolved[key] = value;
 }
 
+/**
+ * The delegates the territory walk actually touches.
+ *
+ * Structural rather than `PrismaClient` so the same walk runs inside a
+ * transaction — member registration derives ancestry and writes the profile in
+ * one transaction, and it must read the graph through that transaction rather
+ * than around it.
+ */
+export type TerritoryGraphClient = Pick<
+  PrismaClient,
+  "pollingUnit" | "ward" | "stateConstituency" | "federalConstituency" | "senatorialDistrict" | "state"
+>;
+
 export async function resolveOperationalTerritory(
-  database: PrismaClient,
+  database: TerritoryGraphClient,
   input: OperationalTerritory,
 ): Promise<ResolvedOperationalTerritory> {
   if (input.stateId !== OGUN_STATE_ID) {

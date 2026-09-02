@@ -73,6 +73,12 @@ export type OgunReferenceReleaseManifest = {
     commandRelationships?: { path: string; sha256: string };
     lgaMemberships?: { path: string; sha256: string };
     pollingUnitGeodata?: { path: string; sha256: string };
+    /**
+     * Ward edges the release build resolved by inference rather than from an
+     * authoritative source. Checksummed like any other release file so the set
+     * cannot be quietly shrunk to make unreviewed edges look sourced.
+     */
+    inferredEdges?: { path: string; sha256: string };
   };
 };
 

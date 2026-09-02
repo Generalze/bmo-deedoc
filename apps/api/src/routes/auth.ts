@@ -14,6 +14,7 @@ import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
+import { deriveMemberAncestryFromWard, MemberAncestryError } from "../lib/member-ancestry";
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
@@ -50,11 +51,8 @@ const registerVoterSchema = z.object({
   password: z.string().min(8),
   voterCardNumber: z.string().trim().min(5),
   stateId: z.string().trim().min(1),
-  senatorialDistrictId: z.string().trim().optional(),
-  federalConstituencyId: z.string().trim().optional(),
   lgaId: z.string().trim().min(1),
   wardId: z.string().trim().min(1),
-  stateConstituencyId: z.string().trim().optional(),
   pollingUnitId: z.string().trim().min(1),
   referredByCode: z.string().trim().min(4).optional(),
   acceptTerms: z.boolean().optional(),
@@ -310,7 +308,31 @@ router.patch("/password", requireAuth, async (request, response) => {
   return response.json({ message: "Password updated successfully." });
 });
 
+/**
+ * Constituency ids a caller used to be able to send, and no longer may.
+ *
+ * Zod strips unknown keys, so leaving these unlisted would silently ignore them
+ * — which looks identical, from the outside, to honouring them. A client still
+ * sending one is working from a contract where it chose its own constituency,
+ * and it should be told that changed rather than left to believe it worked.
+ */
+const SERVER_DERIVED_ANCESTRY_FIELDS = [
+  "senatorialDistrictId",
+  "federalConstituencyId",
+  "stateConstituencyId",
+] as const;
+
 router.post("/register-voter", async (request, response) => {
+  const suppliedAncestryFields = SERVER_DERIVED_ANCESTRY_FIELDS.filter(
+    (field) => request.body !== null && typeof request.body === "object" && field in (request.body as object),
+  );
+  if (suppliedAncestryFields.length > 0) {
+    return response.status(400).json({
+      message: `Constituency ancestry is derived by the server from the selected ward and must not be supplied: ${suppliedAncestryFields.join(", ")}.`,
+      code: "ANCESTRY_NOT_CALLER_SUPPLIED",
+    });
+  }
+
   const parsed = registerVoterSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid voter registration payload.", errors: parsed.error.flatten() });
@@ -457,119 +479,146 @@ router.post("/register-voter", async (request, response) => {
 
   const referralCode = await generateUniqueReferralCode();
   const passwordHash = await hashPassword(parsed.data.password);
-  const voterProfileData: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
-    voterCardNumber,
-    referralCode,
-    referredByUserId: referrer?.id || null,
-    contactConsent: parsed.data.contactConsent ?? true,
-    termsAcceptedAt: new Date(),
-    privacyAcceptedAt: new Date(),
-    documentConsentAt: parsed.data.voterDocument ? new Date() : null,
-    consentVersion: parsed.data.consentVersion || "pre-election-v1",
-    stateId: parsed.data.stateId,
-    senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-    federalConstituencyId: parsed.data.federalConstituencyId || null,
-    lgaId: parsed.data.lgaId,
-    wardId: parsed.data.wardId,
-    stateConstituencyId: parsed.data.stateConstituencyId || null,
-    pollingUnitId: parsed.data.pollingUnitId,
-  };
 
-  const createdUser = await prisma.$transaction(async (transaction) => {
-    const user = existingUser
-      ? await transaction.user.update({
-          where: { id: existingUser.id },
-          data: {
-            phone: existingUser.phone || parsed.data.phone.trim(),
-            voterProfile: {
-              create: voterProfileData,
-            },
-          },
-        })
-      : await transaction.user.create({
-          data: {
-            name: parsed.data.fullName.trim(),
-            email,
-            phone: parsed.data.phone.trim(),
-            passwordHash,
-            role: UserRole.VOTER,
-            voterProfile: {
-              create: voterProfileData,
-            },
-          },
-        });
+  let createdUser;
+  try {
+    createdUser = await prisma.$transaction(async (transaction) => {
+      /**
+       * Derived inside the transaction, from the ward, and read through the same
+       * transaction that writes the profile. If it throws, nothing above it has
+       * been committed, so a registration is either complete with a proven
+       * ancestry or it does not exist.
+       */
+      const ancestry = await deriveMemberAncestryFromWard(transaction, {
+        stateId: parsed.data.stateId,
+        lgaId: parsed.data.lgaId,
+        wardId: parsed.data.wardId,
+        pollingUnitId: parsed.data.pollingUnitId,
+      });
 
-    const duplicateDocument = parsed.data.voterDocument
-      ? await transaction.voterVerificationDocument.findFirst({
-          where: {
-            sha256: parsed.data.voterDocument.sha256.toLowerCase(),
-            verification: {
-              memberUserId: { not: user.id },
-            },
-          },
-          select: { id: true },
-        })
-      : null;
+      const voterProfileData: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
+        voterCardNumber,
+        referralCode,
+        referredByUserId: referrer?.id || null,
+        contactConsent: parsed.data.contactConsent ?? true,
+        termsAcceptedAt: new Date(),
+        privacyAcceptedAt: new Date(),
+        documentConsentAt: parsed.data.voterDocument ? new Date() : null,
+        consentVersion: parsed.data.consentVersion || "pre-election-v1",
+        stateId: ancestry.stateId,
+        senatorialDistrictId: ancestry.senatorialDistrictId,
+        federalConstituencyId: ancestry.federalConstituencyId,
+        lgaId: ancestry.lgaId,
+        wardId: ancestry.wardId,
+        stateConstituencyId: ancestry.stateConstituencyId,
+        pollingUnitId: ancestry.pollingUnitId,
+      };
 
-    const verification = await transaction.voterVerification.create({
-      data: {
-        memberUserId: user.id,
-        voterIdentifier: voterCardNumber,
-        status: parsed.data.voterDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
-        isFlagged: Boolean(duplicateDocument),
-        fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
-        submittedAt: parsed.data.voterDocument ? new Date() : null,
-        documents: parsed.data.voterDocument
-          ? {
-              create: {
-                originalStorageKey: parsed.data.voterDocument.originalStorageKey,
-                previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
-                originalFileName: parsed.data.voterDocument.originalFileName,
-                mimeType: parsed.data.voterDocument.mimeType,
-                fileSize: parsed.data.voterDocument.fileSize,
-                sha256: parsed.data.voterDocument.sha256.toLowerCase(),
-                storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+      const user = existingUser
+        ? await transaction.user.update({
+            where: { id: existingUser.id },
+            data: {
+              phone: existingUser.phone || parsed.data.phone.trim(),
+              voterProfile: {
+                create: voterProfileData,
               },
-            }
-          : undefined,
-      },
-    });
+            },
+          })
+        : await transaction.user.create({
+            data: {
+              name: parsed.data.fullName.trim(),
+              email,
+              phone: parsed.data.phone.trim(),
+              passwordHash,
+              role: UserRole.VOTER,
+              voterProfile: {
+                create: voterProfileData,
+              },
+            },
+          });
 
-    await transaction.voterVerificationHistory.create({
-      data: {
-        verificationId: verification.id,
-        actorUserId: user.id,
-        fromStatus: null,
-        toStatus: verification.status,
-        decision: parsed.data.voterDocument
-          ? duplicateDocument
-            ? VoterVerificationDecision.FLAGGED
-            : VoterVerificationDecision.SUBMITTED
-          : VoterVerificationDecision.NOTE_ADDED,
-        note: parsed.data.voterDocument
-          ? duplicateDocument
-            ? "Registration evidence submitted and flagged for duplicate document hash."
-            : "Registration evidence submitted for validation."
-          : "Registration completed without voter evidence submission.",
-      },
-    });
+      const duplicateDocument = parsed.data.voterDocument
+        ? await transaction.voterVerificationDocument.findFirst({
+            where: {
+              sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+              verification: {
+                memberUserId: { not: user.id },
+              },
+            },
+            select: { id: true },
+          })
+        : null;
 
-    if (referrer) {
-      await transaction.referral.create({
+      const verification = await transaction.voterVerification.create({
         data: {
-          referredUserId: user.id,
-          referrerUserId: referrer.id,
-          referralCodeId: referrer.referralCodeId,
-          referralCode: referrer.referralCode,
-          status: duplicateDocument ? ReferralStatus.FLAGGED : ReferralStatus.PENDING_VERIFICATION,
-          flaggedAt: duplicateDocument ? new Date() : null,
+          memberUserId: user.id,
+          voterIdentifier: voterCardNumber,
+          status: parsed.data.voterDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
+          isFlagged: Boolean(duplicateDocument),
           fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+          submittedAt: parsed.data.voterDocument ? new Date() : null,
+          documents: parsed.data.voterDocument
+            ? {
+                create: {
+                  originalStorageKey: parsed.data.voterDocument.originalStorageKey,
+                  previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
+                  originalFileName: parsed.data.voterDocument.originalFileName,
+                  mimeType: parsed.data.voterDocument.mimeType,
+                  fileSize: parsed.data.voterDocument.fileSize,
+                  sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+                  storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+                },
+              }
+            : undefined,
         },
       });
-    }
 
-    return user;
-  });
+      await transaction.voterVerificationHistory.create({
+        data: {
+          verificationId: verification.id,
+          actorUserId: user.id,
+          fromStatus: null,
+          toStatus: verification.status,
+          decision: parsed.data.voterDocument
+            ? duplicateDocument
+              ? VoterVerificationDecision.FLAGGED
+              : VoterVerificationDecision.SUBMITTED
+            : VoterVerificationDecision.NOTE_ADDED,
+          note: parsed.data.voterDocument
+            ? duplicateDocument
+              ? "Registration evidence submitted and flagged for duplicate document hash."
+              : "Registration evidence submitted for validation."
+            : "Registration completed without voter evidence submission.",
+        },
+      });
+
+      if (referrer) {
+        await transaction.referral.create({
+          data: {
+            referredUserId: user.id,
+            referrerUserId: referrer.id,
+            referralCodeId: referrer.referralCodeId,
+            referralCode: referrer.referralCode,
+            status: duplicateDocument ? ReferralStatus.FLAGGED : ReferralStatus.PENDING_VERIFICATION,
+            flaggedAt: duplicateDocument ? new Date() : null,
+            fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+          },
+        });
+      }
+
+      return user;
+    });
+  } catch (error) {
+    /**
+     * The transaction has already rolled back by the time this runs, so a
+     * refused ancestry leaves no user, no profile, no verification record and
+     * no referral — the registration simply did not happen.
+     */
+    if (error instanceof MemberAncestryError) {
+      return response.status(400).json({ message: error.message, code: error.code });
+    }
+    throw error;
+  }
 
   const authUser = await getAuthUserProfile(createdUser.id);
 

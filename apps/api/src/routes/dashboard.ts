@@ -18,6 +18,12 @@ import {
 } from "@pics-nigeria/shared";
 import { z } from "zod";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
+import {
+  buildOperationalPollingUnitTerritoryWhere,
+  buildOperationalVoterProfileTerritoryWhere,
+  selectCurrentMemberTerritorySnapshots,
+  SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
+} from "../lib/member-territory-scope";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
 
@@ -72,21 +78,12 @@ function territoryFor(level: DashboardLevel, territoryId: string): OperationalTe
   }
 }
 
+/**
+ * Members are scoped by the one canonical authority, shared with the strength
+ * engine so a dashboard tile and the score printed beside it cannot disagree.
+ */
 function voterWhereFor(level: DashboardLevel, territoryId: string): Prisma.VoterProfileWhereInput {
-  switch (level) {
-    case "STATE":
-      return { stateId: territoryId };
-    case "SENATORIAL_DISTRICT":
-      return { senatorialDistrictId: territoryId };
-    case "FEDERAL_CONSTITUENCY":
-      return { federalConstituencyId: territoryId };
-    case "STATE_CONSTITUENCY":
-      return { stateConstituencyId: territoryId };
-    case "WARD":
-      return { wardId: territoryId };
-    case "POLLING_UNIT":
-      return { pollingUnitId: territoryId };
-  }
+  return buildOperationalVoterProfileTerritoryWhere(level, territoryId);
 }
 
 function coordinatorWhereFor(level: DashboardLevel, territoryId: string): Prisma.CoordinatorProfileWhereInput {
@@ -106,21 +103,12 @@ function coordinatorWhereFor(level: DashboardLevel, territoryId: string): Prisma
   }
 }
 
+/**
+ * Polling units answer to the same operational predicate as members, so a
+ * constituency cannot show polling units it will not place members in.
+ */
 function pollingUnitWhereFor(level: DashboardLevel, territoryId: string): Prisma.PollingUnitWhereInput {
-  switch (level) {
-    case "STATE":
-      return { stateId: territoryId };
-    case "SENATORIAL_DISTRICT":
-      return { ward: { stateConstituency: { federalConstituency: { senatorialDistrictId: territoryId } } } };
-    case "FEDERAL_CONSTITUENCY":
-      return { ward: { stateConstituency: { federalConstituencyId: territoryId } } };
-    case "STATE_CONSTITUENCY":
-      return { ward: { stateConstituencyId: territoryId } };
-    case "WARD":
-      return { wardId: territoryId };
-    case "POLLING_UNIT":
-      return { id: territoryId };
-  }
+  return buildOperationalPollingUnitTerritoryWhere(level, territoryId);
 }
 
 async function territoryNameFor(level: DashboardLevel, territoryId: string): Promise<string | null> {
@@ -266,12 +254,23 @@ async function countsFor(level: DashboardLevel, territoryId: string): Promise<Le
  * which keeps every level usable before snapshots are calculated.
  */
 async function strengthFor(level: DashboardLevel, territoryId: string, counts: LevelCounts) {
-  const snapshots = await prisma.territoryStrengthSnapshot.findMany({
+  /**
+   * Only snapshots calculated under the current member-scope semantics.
+   *
+   * A snapshot outlives the code that produced it, and this function prefers one
+   * over the live count below. A snapshot from before member scope moved onto
+   * the ward graph scored territories on nullable ancestry columns — typically
+   * zero — and would otherwise keep overriding a correct live count forever,
+   * surviving the backfill that fixed the underlying data. Older snapshots are
+   * ignored, not rewritten: they record what was calculated at the time.
+   */
+  const candidateSnapshots = await prisma.territoryStrengthSnapshot.findMany({
     where: { territoryType: level, territoryId },
     orderBy: { calculatedAt: "desc" },
-    take: 2,
-    select: { score: true },
+    take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
+    select: { score: true, breakdownJson: true },
   });
+  const snapshots = selectCurrentMemberTerritorySnapshots(candidateSnapshots, 2);
 
   if (snapshots.length > 0) {
     const latest = snapshots[0].score.toNumber();

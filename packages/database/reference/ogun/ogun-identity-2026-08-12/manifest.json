@@ -33,6 +33,10 @@
     "lgaMemberships": {
       "path": "lga-memberships.csv",
       "sha256": "91d8d255efbfe1b5dc519977d6a7c684c980aa6a70a9a03da136aad56e129b55"
+    },
+    "inferredEdges": {
+      "path": "INFERRED-EDGES.csv",
+      "sha256": "cd103a93ddf0e83fb40ab3ace785aa54f1b4859273c453ae8e53696d202e4ba5"
     }
   }
 }
