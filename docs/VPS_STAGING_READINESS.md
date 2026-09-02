@@ -165,12 +165,13 @@ surfaced, and they gate real-user exposure independently of infrastructure work.
 - ~~Derive State → Senatorial District → Federal Constituency → State Constituency → Ward → Polling Unit~~ — `apps/api/src/lib/member-ancestry.ts`
 - ~~Populate ancestry on the real registration/write path~~ — derived inside the registration transaction; the three constituency ids were removed from the public request contract
 - ~~Repair or backfill existing compatible records~~ — `npm run backfill:member-ancestry` (dry-run / apply, idempotent)
-- ~~Dashboards must read real ancestry, not nullable denormalised columns~~ — the command dashboard scopes members by joining through the ward graph
+- ~~Dashboards must read real ancestry, not nullable denormalised columns~~ — one shared authority (`apps/api/src/lib/member-territory-scope.ts`) scopes members for both the command dashboard and the strength engine, and constituency-level counts exclude unreviewed inferred edges
 
 **This does not make member ancestry operationally complete.** 55 of the 236
 ward → State Constituency edges in the Ogun identity release are inferred and
 still unreviewed (recorded as 56 rows; one ward is listed twice, the earlier
-row superseded). Registration on those wards fails closed with
+row superseded). Provenance is now initialised by the database upgrade itself,
+so the fail-closed rule holds on an existing database without re-importing. Registration on those wards fails closed with
 `ANCESTRY_EDGE_UNREVIEWED`, and the backfill reports but never repairs members
 sitting on them. Those wards cannot register members until the edges are
 reviewed, which is a data-governance action and not an engineering one.
@@ -185,6 +186,22 @@ See [`docs/MEMBER_ANCESTRY.md`](MEMBER_ANCESTRY.md).
 | Unreviewed inferred mappings | Fail-closed / operationally blocked |
 | Operational completeness | Pending human review of the 56 inferred edges |
 | Production readiness | Not claimed |
+
+### Follow-up (not P0, recorded here rather than fixed)
+
+**Territory strength snapshots ignore `candidateId` on read.**
+`strengthFor` in `apps/api/src/routes/dashboard.ts` selects the most recent
+`TerritoryStrengthSnapshot` for a territory with no `candidateId` filter, while
+the writer in `apps/api/src/routes/pre-election.ts` scopes its previous-snapshot
+lookup to `candidateId: … || null`. `TerritoryStrengthSnapshot.candidateId` is
+nullable, so a candidate-scoped snapshot can become the command dashboard's
+territory-wide score, band and trend.
+
+Pre-existing, and a candidate-scoping defect rather than a member-ancestry one,
+so it was deliberately left out of the P0 #4 correction to keep that change from
+becoming a strength-engine rewrite. It is not covered by the scope-version gate:
+a candidate-scoped snapshot written by current code carries the current version
+and would be accepted.
 
 ### 5. Voter-card upload
 - Perform an actual private-object-storage upload

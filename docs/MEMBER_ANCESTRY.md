@@ -93,17 +93,34 @@ indistinguishable.
 
 Made machine-enforceable additively:
 
-- `INFERRED-EDGES.csv` is now a checksummed manifest file, so the set cannot be
-  quietly shrunk to make unreviewed edges look sourced.
+- `INFERRED-EDGES.csv` is now a checksummed manifest file **produced by the
+  release builder**, so the set cannot be quietly shrunk to make unreviewed edges
+  look sourced. It is **required** for an identity release: a missing file means
+  the provenance is unknown, not that nothing was inferred, and the import
+  refuses it rather than marking 55 guesses as sourced.
 - `Ward.stateConstituencyEdgeInferred` and `stateConstituencyEdgeInferenceBasis`
   record the inference. **Owned by the import.**
 - `Ward.stateConstituencyEdgeReviewedAt` and `stateConstituencyEdgeReviewedBy`
   record human review. **Owned by governance, never written by the importer**,
   so re-importing a release cannot silently revoke a completed review.
 
-An edge is usable when it is not inferred, or has been reviewed. Registration on
-a ward failing that test is refused with `ANCESTRY_EDGE_UNREVIEWED` and writes
-nothing.
+An edge is **operational** when it is not inferred, or has been reviewed.
+Registration on a ward failing that test is refused with
+`ANCESTRY_EDGE_UNREVIEWED` and writes nothing.
+
+Provenance is initialised **during the database upgrade**, not only by the
+importer. The column-adding migration defaults `stateConstituencyEdgeInferred` to
+`false`, and no deploy path runs the importer — so on a database that imported
+the release before the columns existed, migrating forward would have left all 236
+wards reading "sourced" and the gate would have had nothing to refuse. A second
+additive migration,
+`20260902120000_backfill_ward_constituency_edge_provenance`, sets the 55 wards
+from data inlined at generation time, keyed on ward identity **and** the
+constituency actually loaded for it. It asserts 236 wards / 55 inferred / 181
+sourced and that no review was created, and fails closed if the database does not
+match the canonical release. It never writes the review columns, and it skips
+entirely on a database with no Ogun wards, where the importer will set provenance
+instead.
 
 **No edge is reviewed by this work.** Reviewing them is a data-governance
 action, not an engineering one. Until it happens, those 55 wards cannot register
@@ -137,10 +154,29 @@ truth.** The authoritative relationship is the territory graph rooted in the
 validated Ward and Polling Unit. Anything writing them must derive them from the
 graph.
 
-The command dashboard (`apps/api/src/routes/dashboard.ts`) now scopes members by
-joining through `ward` to the constituency graph, mirroring what
-`pollingUnitWhereFor` already did. That is correct for rows the backfill has not
-reached, because a member's ward is not nullable.
+### One member-territory scope
+
+`apps/api/src/lib/member-territory-scope.ts` owns
+`buildOperationalVoterProfileTerritoryWhere`, and both consumers call it: the
+command dashboard's member counts and the pre-election strength engine's snapshot
+calculation. They previously defined member territory separately — the dashboard
+on the ward graph, the strength engine on the nullable columns — and because the
+dashboard prefers a snapshot over its own live count, a strength score of zero
+could be printed beside a tile counting hundreds.
+
+**Constituency-level counts exclude unreviewed inferred edges.** If the write
+path declines to say which constituency a member is in, the read path must not
+answer anyway. A member whose ward edge is unreviewed is still counted at STATE,
+WARD and POLLING_UNIT — those do not depend on the disputed edge — and is counted
+at STATE_CONSTITUENCY, FEDERAL_CONSTITUENCY and SENATORIAL_DISTRICT only once the
+edge is reviewed.
+
+**Strength snapshots are scope-versioned.** New snapshots record
+`memberTerritoryScopeVersion` in their breakdown JSON; the dashboard ignores
+snapshots that do not carry the current version, falling back to its live derived
+score. Old snapshots are not rewritten — they record what was calculated at the
+time — but they can no longer override canonical ancestry, which is what let a
+pre-fix zero outlive the backfill that fixed the data.
 
 `scripts/verify-ancestry-authority.mjs` fails the build if the registration path
 regains a direct client-to-profile ancestry write, if the request contract
@@ -155,5 +191,7 @@ present before checking for its misuse, so it cannot pass vacuously.
 | Registration derivation | **Server-owned** |
 | Compatible reviewed records | **Backfillable** |
 | Unreviewed inferred mappings | **Fail-closed / operationally blocked** |
+| Constituency-level counts | **Exclude unreviewed inferred edges** |
+| Strength snapshots | **Scope-versioned; obsolete ones cannot override live truth** |
 | Operational completeness | **Pending human review of the 55 inferred edges** |
 | Production readiness | **Not claimed** |

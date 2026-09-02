@@ -83,6 +83,58 @@ if (!schemaMatch) {
   }
 }
 
+/**
+ * One member-territory scope, used by both consumers.
+ *
+ * The dashboard's member counts and the strength engine's snapshot calculation
+ * once defined member territory separately, and the dashboard prefers a snapshot
+ * over its own count — so the two disagreeing produced a score of zero printed
+ * beside a tile reading four hundred. Checking that both *import the authority*
+ * is robust in a way that pattern-matching every Prisma filter shape is not.
+ */
+const SCOPE_AUTHORITY = join("apps", "api", "src", "lib", "member-territory-scope.ts");
+const SCOPE_CONSUMERS = [
+  join("apps", "api", "src", "routes", "dashboard.ts"),
+  join("apps", "api", "src", "routes", "pre-election.ts"),
+];
+
+const scopeAuthority = readFileSync(join(repoRoot, SCOPE_AUTHORITY), "utf8");
+if (!scopeAuthority.includes("stateConstituencyEdgeReviewedAt")) {
+  failures.push(`${SCOPE_AUTHORITY} no longer applies the reviewed-edge predicate; this check would pass vacuously.`);
+}
+if (!scopeAuthority.includes("MEMBER_TERRITORY_SCOPE_VERSION")) {
+  failures.push(`${SCOPE_AUTHORITY} no longer declares a scope version; stale snapshots could not be rejected.`);
+}
+
+for (const consumer of SCOPE_CONSUMERS) {
+  const source = readFileSync(join(repoRoot, consumer), "utf8");
+  if (!source.includes("buildOperationalVoterProfileTerritoryWhere")) {
+    failures.push(`${consumer} does not use the shared member territory scope authority.`);
+  }
+  /**
+   * And must not have grown a private one again. Only VoterProfile-shaped
+   * constituency filters are rejected: the coordinator and polling-unit scopes
+   * in these files legitimately filter on their own columns.
+   */
+  const normalised = source.replace(/\s+/g, " ");
+  for (const field of ANCESTRY_FIELDS) {
+    if (normalised.includes(`VoterProfileWhereInput { if`) && normalised.includes(`return { ${field}: territoryId };`)) {
+      failures.push(`${consumer} builds a private VoterProfile constituency scope on ${field}.`);
+    }
+  }
+}
+
+/** The active identity release must carry inferred-edge provenance. */
+const RELEASE_MANIFEST = join(
+  "packages", "database", "reference", "ogun", "ogun-identity-2026-08-12", "manifest.json",
+);
+const manifest = JSON.parse(readFileSync(join(repoRoot, RELEASE_MANIFEST), "utf8"));
+if (!manifest.files?.inferredEdges?.sha256) {
+  failures.push(
+    `${RELEASE_MANIFEST} does not checksum INFERRED-EDGES.csv; a release without it asserts nothing about which edges were inferred.`,
+  );
+}
+
 if (failures.length > 0) {
   console.error("FAIL member constituency ancestry must be derived by the server:");
   for (const failure of failures) {
@@ -93,4 +145,5 @@ if (failures.length > 0) {
 
 console.log(`ancestry_authority=${ANCESTRY_AUTHORITY.split(sep).join("/")}`);
 console.log(`ancestry_fields_guarded=${ANCESTRY_FIELDS.length}`);
+console.log(`ancestry_scope_consumers=${SCOPE_CONSUMERS.length}`);
 console.log("ancestry_authority_integrity=ok");

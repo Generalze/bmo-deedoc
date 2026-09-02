@@ -17,6 +17,11 @@ import { OGUN_STATE_ID, type OperationalTerritory } from "@pics-nigeria/shared";
 import { z } from "zod";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
+import {
+  buildOperationalVoterProfileTerritoryWhere,
+  MEMBER_TERRITORY_SCOPE_VERSION,
+  type MemberTerritoryLevel,
+} from "../lib/member-territory-scope";
 import { createAuditLog } from "../lib/audit";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
 import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
@@ -357,23 +362,17 @@ function decimalToString(value: Prisma.Decimal | number | string) {
   return new Prisma.Decimal(value).toFixed(2);
 }
 
+/**
+ * Member scope is not defined here.
+ *
+ * This used to filter on VoterProfile's nullable ancestry columns while the
+ * command dashboard filtered on the ward graph, so a strength score of zero
+ * could be written for a territory whose dashboard tile read four hundred — and
+ * because the dashboard prefers a snapshot over its live count, that zero then
+ * became what everyone saw. One authority now answers for both.
+ */
 function buildScopedVoterProfileWhere(territoryType: string, territoryId: string): Prisma.VoterProfileWhereInput {
-  if (territoryType === "STATE") {
-    return { stateId: territoryId };
-  }
-  if (territoryType === "SENATORIAL_DISTRICT") {
-    return { senatorialDistrictId: territoryId };
-  }
-  if (territoryType === "FEDERAL_CONSTITUENCY") {
-    return { federalConstituencyId: territoryId };
-  }
-  if (territoryType === "STATE_CONSTITUENCY") {
-    return { stateConstituencyId: territoryId };
-  }
-  if (territoryType === "WARD") {
-    return { wardId: territoryId };
-  }
-  return { pollingUnitId: territoryId };
+  return buildOperationalVoterProfileTerritoryWhere(territoryType as MemberTerritoryLevel, territoryId);
 }
 
 function buildScopedVerificationWhere(territoryType?: string, territoryId?: string): Prisma.VoterVerificationWhereInput {
@@ -2487,7 +2486,13 @@ router.post("/strength/snapshots/calculate", requireAuth, requireRole("SUPER_ADM
       territoryId: parsed.data.territoryId,
       candidateId: parsed.data.candidateId || null,
       score,
-      breakdownJson: breakdown,
+      /**
+       * Stamped with the member-scope semantics this score was calculated
+       * under. The dashboard prefers a snapshot over its own live count, so an
+       * unversioned snapshot from before member scope moved onto the ward graph
+       * must be ignorable rather than authoritative forever.
+       */
+      breakdownJson: { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: breakdown },
       calculatedAt: now,
     },
   });

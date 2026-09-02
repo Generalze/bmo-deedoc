@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Prisma } from "@prisma/client";
 import { OGUN_STATE_ID } from "@pics-nigeria/shared";
+import {
+  applyIdentityRelease,
+  validateIdentityRelease,
+  validateManifest,
+} from "../../../packages/database/scripts/import-ogun-reference-release";
+import { MEMBER_TERRITORY_SCOPE_VERSION } from "./lib/member-territory-scope";
 import { runMemberAncestryBackfill } from "../../../packages/database/scripts/backfill-member-ancestry";
 import { hashPassword } from "./auth/password";
 import { createApp } from "./app";
@@ -187,6 +198,63 @@ async function teardown() {
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
+}
+
+/**
+ * Repo root, located by walking up rather than by counting directories.
+ *
+ * These tests run from `apps/api/dist/apps/api/src` after compilation and from
+ * `apps/api/src` in the editor, so a fixed number of `..` segments is wrong in
+ * one of the two.
+ */
+const repoRoot = (() => {
+  let current = __dirname;
+  for (let depth = 0; depth < 12; depth += 1) {
+    if (existsSync(path.join(current, "packages", "database", "prisma", "ogun-migrations"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  throw new Error(`Could not locate the repository root from ${__dirname}.`);
+})();
+
+async function registeredMembers(token: string, level: string, territoryId: string) {
+  const view = await apiRequest(`/dashboard?level=${level}&territoryId=${territoryId}`, { token });
+  assert.equal(view.status, 200, `${level}: ${JSON.stringify(view.payload)}`);
+  const tiles = (view.payload as { dashboard: { tiles: Array<{ key: string; value: number }> } }).dashboard.tiles;
+  return tiles.find((tile) => tile.key === "REGISTERED_MEMBERS")?.value ?? 0;
+}
+
+/** Places a member directly, for wards registration itself refuses. */
+async function placeMemberOnWard(slug: string, wardId: string, pollingUnitId: string) {
+  const ward = await prisma.ward.findUniqueOrThrow({ where: { id: wardId }, select: { lgaId: true } });
+  const user = await prisma.user.create({
+    data: {
+      name: `Ancestry ${slug}`,
+      email: email(slug),
+      passwordHash: await hashPassword(password),
+      role: "VOTER",
+      voterProfile: {
+        create: {
+          voterCardNumber: `ANCESTRY-${slug.toUpperCase()}`,
+          referralCode: `ANC${slug.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 8)}`,
+          stateId: OGUN_STATE_ID,
+          lgaId: ward.lgaId,
+          wardId,
+          pollingUnitId,
+        },
+      },
+    },
+    select: { id: true },
+  });
+  return user.id;
+}
+
+async function removeMember(userId: string) {
+  await prisma.voterProfile.deleteMany({ where: { userId } });
+  await prisma.user.deleteMany({ where: { id: userId } });
 }
 
 async function profileFor(slug: string) {
@@ -417,8 +485,10 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
     },
   },
   {
-    name: "the command dashboard counts a member through the constituency chain",
+    name: "constituency counts exclude a member whose ward edge is unreviewed, and include them once reviewed",
     run: async () => {
+      // D3. The write path refuses to say which constituency this member is in.
+      // The read path must not answer the question anyway.
       const officerEmail = email("state-officer");
       await prisma.user.create({
         data: {
@@ -426,31 +496,376 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
           email: officerEmail,
           passwordHash: await hashPassword(password),
           role: "STATE_OFFICER",
-          coordinatorProfile: {
-            create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID },
-          },
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
         },
       });
-      const session = await apiRequest("/auth/login", {
-        method: "POST",
-        body: { email: officerEmail, password },
-      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
       assert.equal(session.status, 200, JSON.stringify(session.payload));
       const token = (session.payload as { token: string }).token;
 
-      for (const [level, territoryId] of [
+      const constituencyLevels = [
         ["STATE_CONSTITUENCY", expected.stateConstituencyId],
         ["FEDERAL_CONSTITUENCY", expected.federalConstituencyId],
         ["SENATORIAL_DISTRICT", expected.senatorialDistrictId],
-      ] as const) {
-        const view = await apiRequest(`/dashboard?level=${level}&territoryId=${territoryId}`, { token });
-        assert.equal(view.status, 200, `${level}: ${JSON.stringify(view.payload)}`);
-        const tiles =
-          (view.payload as { dashboard?: { tiles?: Array<{ key: string; value: number }> } }).dashboard?.tiles ?? [];
-        const registered = tiles.find((tile) => tile.key === "REGISTERED_MEMBERS")?.value ?? 0;
+      ] as const;
+
+      const baseline = new Map<string, number>();
+      for (const [level, territoryId] of constituencyLevels) {
+        baseline.set(level, await registeredMembers(token, level, territoryId));
+      }
+      const wardBaseline = await registeredMembers(token, "WARD", inferredWardId);
+      const stateBaseline = await registeredMembers(token, "STATE", OGUN_STATE_ID);
+      const pollingUnitBaseline = await registeredMembers(token, "POLLING_UNIT", inferredPollingUnitId);
+
+      // A member placed directly on the unreviewed ward, because registration
+      // refuses that ward entirely.
+      const placed = await placeMemberOnWard("d3-unreviewed", inferredWardId, inferredPollingUnitId);
+
+      for (const [level, territoryId] of constituencyLevels) {
+        assert.equal(
+          await registeredMembers(token, level, territoryId),
+          baseline.get(level),
+          `${level} must not count a member whose ward edge is unreviewed`,
+        );
+      }
+      assert.equal(
+        await registeredMembers(token, "WARD", inferredWardId),
+        wardBaseline + 1,
+        "the member's ward is not in question and must still count them",
+      );
+      assert.equal(
+        await registeredMembers(token, "STATE", OGUN_STATE_ID),
+        stateBaseline + 1,
+        "the member's state is not in question and must still count them",
+      );
+      assert.equal(
+        await registeredMembers(token, "POLLING_UNIT", inferredPollingUnitId),
+        pollingUnitBaseline + 1,
+        "the member's polling unit is not in question and must still count them",
+      );
+
+      /**
+       * Reviewing the edge is what makes the higher levels answerable — for
+       * every member on that ward, not just the one this case placed. Earlier
+       * cases leave members there too, so the expected rise is measured rather
+       * than assumed.
+       */
+      const membersOnInferredWard = await registeredMembers(token, "WARD", inferredWardId);
+      await prisma.ward.update({
+        where: { id: inferredWardId },
+        data: { stateConstituencyEdgeReviewedAt: new Date(), stateConstituencyEdgeReviewedBy: "ancestry-test" },
+      });
+      try {
+        for (const [level, territoryId] of constituencyLevels) {
+          assert.equal(
+            await registeredMembers(token, level, territoryId),
+            (baseline.get(level) ?? 0) + membersOnInferredWard,
+            `${level} must count the ward's members once the edge is reviewed`,
+          );
+        }
+      } finally {
+        await prisma.ward.update({
+          where: { id: inferredWardId },
+          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+        });
+        await removeMember(placed);
+      }
+    },
+  },
+  {
+    name: "the provenance backfill migration makes an already-imported database true without re-importing",
+    run: async () => {
+      // D1. The decisive regression: the state a PR #11 database lands in after
+      // migrating forward is reproduced exactly -- provenance columns present
+      // and at their DEFAULT false, importer never rerun -- and the checked-in
+      // migration must correct it.
+      const before = await prisma.ward.count({
+        where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeInferred: true },
+      });
+      assert.ok(before > 0, "the imported release must have flagged inferred edges to begin with");
+
+      const syntheticWards = [inferredWardId, orphanWardId];
+      const saved = await prisma.ward.findMany({
+        where: { id: { in: syntheticWards } },
+        select: { id: true, stateConstituencyEdgeInferred: true, stateConstituencyEdgeInferenceBasis: true },
+      });
+
+      await prisma.ward.updateMany({
+        where: { stateId: OGUN_STATE_ID },
+        data: { stateConstituencyEdgeInferred: false, stateConstituencyEdgeInferenceBasis: null },
+      });
+      assert.equal(
+        await prisma.ward.count({ where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeInferred: true } }),
+        0,
+        "defect state: every ward reads sourced",
+      );
+
+      // Registration would succeed here, which is precisely the defect.
+      const migrationSql = readFileSync(
+        path.join(
+          repoRoot,
+          "packages/database/prisma/ogun-migrations/20260902120000_backfill_ward_constituency_edge_provenance/migration.sql",
+        ),
+        "utf8",
+      );
+      await prisma.$executeRawUnsafe(migrationSql);
+
+      const releaseInferred = await prisma.ward.count({
+        where: {
+          stateId: OGUN_STATE_ID,
+          stateConstituencyEdgeInferred: true,
+          id: { notIn: syntheticWards },
+        },
+      });
+      assert.equal(releaseInferred, 55, "the migration must flag exactly the 55 release wards");
+      assert.equal(
+        await prisma.ward.count({
+          where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeInferred: false, id: { notIn: syntheticWards } },
+        }),
+        181,
+        "the remaining release wards must stay sourced",
+      );
+      assert.equal(
+        await prisma.ward.count({
+          where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeReviewedAt: { not: null } },
+        }),
+        0,
+        "the migration must not review anything",
+      );
+
+      // And the gate it exists to feed is live: registration on a ward the
+      // migration flagged is refused, with no importer having been rerun.
+      const flagged = await prisma.ward.findFirst({
+        where: {
+          stateId: OGUN_STATE_ID,
+          stateConstituencyEdgeInferred: true,
+          id: { notIn: syntheticWards },
+          pollingUnits: { some: {} },
+        },
+        orderBy: { id: "asc" },
+        select: { id: true, lgaId: true, pollingUnits: { take: 1, orderBy: { id: "asc" }, select: { id: true } } },
+      });
+      assert.ok(flagged, "a flagged release ward with a polling unit is required for this assertion");
+      const refused = await apiRequest("/auth/register-voter", {
+        method: "POST",
+        body: registrationBody("d1-upgrade", {
+          lgaId: flagged.lgaId,
+          wardId: flagged.id,
+          pollingUnitId: flagged.pollingUnits[0].id,
+        }),
+      });
+      assert.equal(refused.status, 400, JSON.stringify(refused.payload));
+      assert.equal(refused.payload.code, "ANCESTRY_EDGE_UNREVIEWED");
+      assert.equal(await prisma.user.count({ where: { email: email("d1-upgrade") } }), 0);
+
+      // Restore the suite's synthetic fixtures, which the reset also cleared.
+      for (const ward of saved) {
+        await prisma.ward.update({
+          where: { id: ward.id },
+          data: {
+            stateConstituencyEdgeInferred: ward.stateConstituencyEdgeInferred,
+            stateConstituencyEdgeInferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
+          },
+        });
+      }
+    },
+  },
+  {
+    name: "the release builder owns the inferred-edge file and the importer refuses a release without it",
+    run: async () => {
+      // D2. A missing INFERRED-EDGES.csv does not mean "nothing was inferred".
+      const releaseDir = path.join(repoRoot, "packages/database/reference/ogun/ogun-identity-2026-08-12");
+      const manifest = JSON.parse(readFileSync(path.join(releaseDir, "manifest.json"), "utf8"));
+
+      assert.ok(manifest.files.inferredEdges, "the committed manifest must checksum the inferred-edge file");
+      const csv = readFileSync(path.join(releaseDir, "INFERRED-EDGES.csv"), "utf8");
+      const canonical = csv.replace(/\r\n?/g, "\n");
+      assert.equal(
+        createHash("sha256").update(canonical, "utf8").digest("hex"),
+        manifest.files.inferredEdges.sha256,
+        "the manifest checksum must match the LF-canonical file, so it verifies identically on Windows and Linux",
+      );
+
+      const rows = canonical.trim().split("\n").slice(1);
+      assert.equal(rows.length, 56, "the release records 56 inference rows");
+      /**
+       * 56 rows, 55 wards. The duplicate is invisible to string comparison: one
+       * row names the ward (`SUNREN`) and the other uses the build's internal
+       * source key (`568:6511`). Only resolution against the release shows they
+       * are the same ward, so the importer's own resolution is asserted here.
+       */
+      const resolvedManifest = validateManifest(releaseDir);
+      assert.ok(resolvedManifest.value, JSON.stringify(resolvedManifest.failures));
+      const resolved = validateIdentityRelease(releaseDir, resolvedManifest.value.manifest);
+      assert.ok(resolved.value, JSON.stringify(resolved.failures));
+      assert.equal(resolved.value.inferredWardEdges.size, 55, "covering 55 distinct wards");
+
+      // Deterministic ordering, so regenerating an unchanged tree reproduces
+      // byte-identical output and therefore the same checksum.
+      const sorted = [...rows].sort((a, b) => {
+        // Code-unit comparison, matching the builder. localeCompare would make
+        // the expected order depend on the machine running the test.
+        const key = (line: string) => line.split(",").slice(0, 3).join("\u0000");
+        return key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0;
+      });
+      assert.deepEqual(rows, sorted, "the committed file must already be in the builder's deterministic order");
+
+      // The builder itself must produce and checksum it, not a human afterwards.
+      const builder = readFileSync(path.join(repoRoot, "packages/database/scripts/build-ogun-reference-release.mjs"), "utf8");
+      assert.ok(
+        builder.includes('inferredEdges: { path: "INFERRED-EDGES.csv"'),
+        "the builder must write the inferred-edge entry into the manifest",
+      );
+
+      // And a release that omits it is refused rather than read as "no edges".
+      const withoutProvenance = { ...manifest, files: { ...manifest.files } };
+      delete withoutProvenance.files.inferredEdges;
+      const scratch = path.join(tmpdir(), `ogun-release-no-provenance-${Date.now()}`);
+      mkdirSync(scratch, { recursive: true });
+      try {
+        for (const name of ["territories.csv", "command-relationships.csv", "lga-memberships.csv", "INFERRED-EDGES.csv"]) {
+          copyFileSync(path.join(releaseDir, name), path.join(scratch, name));
+        }
+        writeFileSync(path.join(scratch, "manifest.json"), JSON.stringify(withoutProvenance, null, 2));
+        const result = validateManifest(scratch);
+        assert.equal(result.value, null, "a release without inferred-edge provenance must not validate");
         assert.ok(
-          registered >= 1,
-          `${level} must count the member registered in its ward: ${JSON.stringify(tiles)}`,
+          result.failures.some((failure) => failure.includes("inferredEdges")),
+          `expected an inferredEdges failure, got ${JSON.stringify(result.failures)}`,
+        );
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "re-importing the release preserves a human review and keeps the inference",
+    run: async () => {
+      // D2. The importer owns inference; governance owns review.
+      const ward = await prisma.ward.findFirst({
+        where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeInferred: true, id: { not: inferredWardId } },
+        orderBy: { id: "asc" },
+        select: { id: true, stateConstituencyEdgeInferenceBasis: true },
+      });
+      assert.ok(ward, "a release ward with an inferred edge is required");
+      const reviewedAt = new Date();
+      await prisma.ward.update({
+        where: { id: ward.id },
+        data: { stateConstituencyEdgeReviewedAt: reviewedAt, stateConstituencyEdgeReviewedBy: "governance-test" },
+      });
+      try {
+        const releaseDir = path.join(repoRoot, "packages/database/reference/ogun/ogun-identity-2026-08-12");
+        const manifestResult = validateManifest(releaseDir);
+        assert.ok(manifestResult.value, JSON.stringify(manifestResult.failures));
+        const payload = validateIdentityRelease(releaseDir, manifestResult.value.manifest);
+        assert.ok(payload.value, JSON.stringify(payload.failures));
+        await applyIdentityRelease(manifestResult.value.manifest, manifestResult.value.manifestPath, payload.value);
+        const after = await prisma.ward.findUniqueOrThrow({
+          where: { id: ward.id },
+          select: {
+            stateConstituencyEdgeInferred: true,
+            stateConstituencyEdgeInferenceBasis: true,
+            stateConstituencyEdgeReviewedAt: true,
+            stateConstituencyEdgeReviewedBy: true,
+          },
+        });
+        assert.equal(after.stateConstituencyEdgeInferred, true, "the inference is a fact about the source and survives");
+        assert.equal(after.stateConstituencyEdgeInferenceBasis, ward.stateConstituencyEdgeInferenceBasis);
+        assert.equal(
+          after.stateConstituencyEdgeReviewedAt?.getTime(),
+          reviewedAt.getTime(),
+          "re-import must never revoke a human review",
+        );
+        assert.equal(after.stateConstituencyEdgeReviewedBy, "governance-test");
+      } finally {
+        await prisma.ward.update({
+          where: { id: ward.id },
+          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+        });
+      }
+    },
+  },
+  {
+    name: "a strength snapshot from the old scope cannot override the live count, and a current one can",
+    run: async () => {
+      // F1. Snapshots outlive the code that produced them.
+      const officerEmail = email("snapshot-officer");
+      await prisma.user.create({
+        data: {
+          name: "Ancestry Snapshot Officer",
+          email: officerEmail,
+          passwordHash: await hashPassword(password),
+          role: "STATE_OFFICER",
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
+        },
+      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
+      const token = (session.payload as { token: string }).token;
+
+      const read = async () => {
+        const view = await apiRequest(
+          `/dashboard?level=STATE_CONSTITUENCY&territoryId=${expected.stateConstituencyId}`,
+          { token },
+        );
+        assert.equal(view.status, 200, JSON.stringify(view.payload));
+        return (view.payload as { dashboard: { strengthScore: number } }).dashboard.strengthScore;
+      };
+
+      const live = await read();
+
+      // An unversioned snapshot, exactly as the pre-fix strength engine wrote it.
+      const stale = await prisma.territoryStrengthSnapshot.create({
+        data: {
+          territoryType: "STATE_CONSTITUENCY",
+          territoryId: expected.stateConstituencyId,
+          score: new Prisma.Decimal(0),
+          breakdownJson: [{ metric: "REGISTERED_MEMBERS", actualValue: 0 }],
+          calculatedAt: new Date(),
+        },
+      });
+      const current = await prisma.territoryStrengthSnapshot.create({
+        data: {
+          territoryType: "STATE_CONSTITUENCY",
+          territoryId: expected.stateConstituencyId,
+          score: new Prisma.Decimal(0),
+          breakdownJson: { memberTerritoryScopeVersion: "SOME_OTHER_VERSION", metrics: [] },
+          calculatedAt: new Date(),
+        },
+      });
+      try {
+        assert.equal(
+          await read(),
+          live,
+          "an obsolete or foreign-version snapshot must not override the live derived score",
+        );
+
+        const accepted = await prisma.territoryStrengthSnapshot.create({
+          data: {
+            territoryType: "STATE_CONSTITUENCY",
+            territoryId: expected.stateConstituencyId,
+            score: new Prisma.Decimal(77),
+            breakdownJson: { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: [] },
+            calculatedAt: new Date(),
+          },
+        });
+        assert.equal(await read(), 77, "a snapshot carrying the current scope version is authoritative");
+        await prisma.territoryStrengthSnapshot.delete({ where: { id: accepted.id } });
+      } finally {
+        await prisma.territoryStrengthSnapshot.deleteMany({ where: { id: { in: [stale.id, current.id] } } });
+      }
+    },
+  },
+  {
+    name: "the strength engine and the dashboard scope members through the same authority",
+    run: async () => {
+      // F1. Not a style point: they disagreeing is what let a score of zero sit
+      // beside a tile counting hundreds.
+      const dashboard = readFileSync(path.join(repoRoot, "apps/api/src/routes/dashboard.ts"), "utf8");
+      const preElection = readFileSync(path.join(repoRoot, "apps/api/src/routes/pre-election.ts"), "utf8");
+      for (const [name, source] of [["dashboard", dashboard], ["pre-election", preElection]] as const) {
+        assert.ok(
+          source.includes("buildOperationalVoterProfileTerritoryWhere"),
+          `${name} must scope members through the shared authority`,
         );
       }
     },

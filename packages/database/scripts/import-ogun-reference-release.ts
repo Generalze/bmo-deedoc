@@ -242,6 +242,22 @@ export function validateManifest(releaseDir: string): ValidationResult<{ manifes
     if (!manifest.files.territories || !manifest.files.commandRelationships || !manifest.files.lgaMemberships) {
       failures.push("Identity releases require territories, commandRelationships, and lgaMemberships files.");
     }
+    /**
+     * Inferred-edge provenance is required, not optional, for an identity
+     * release under this contract version.
+     *
+     * A missing INFERRED-EDGES.csv does not mean "no edge was inferred" — it
+     * means the provenance is unknown. Treating the two as equivalent is how a
+     * regenerated release would silently mark 55 guesses as sourced, so the
+     * absent case fails closed. The field stays optional in the shared contract
+     * for historical releases and for geodata releases, which have no edges.
+     */
+    if (!manifest.files.inferredEdges) {
+      failures.push(
+        "Identity releases require an inferredEdges file. A release without one asserts nothing about which ward edges were inferred; " +
+          "regenerate it with build-ogun-reference-release.mjs rather than importing it.",
+      );
+    }
     if (manifest.declaredCounts.stateConstituencies !== OGUN_IDENTITY_REQUIRED_COUNTS.stateConstituencies) {
       failures.push(`Identity release must declare ${OGUN_IDENTITY_REQUIRED_COUNTS.stateConstituencies} State Constituencies.`);
     }
@@ -694,7 +710,11 @@ async function upsertRelease(client: any, manifest: OgunReferenceReleaseManifest
   });
 }
 
-async function applyIdentityRelease(
+/**
+ * Exported so the integration suite can re-import a release through the same
+ * code the CLI runs, and prove that doing so preserves a human review.
+ */
+export async function applyIdentityRelease(
   manifest: OgunReferenceReleaseManifest,
   manifestPath: string,
   payload: NonNullable<ReturnType<typeof validateIdentityRelease>["value"]>,
