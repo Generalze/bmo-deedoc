@@ -18,6 +18,7 @@ import { z } from "zod";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import {
+  buildOperationalPollingUnitTerritoryWhere,
   buildOperationalVoterProfileTerritoryWhere,
   MEMBER_TERRITORY_SCOPE_VERSION,
   selectCurrentMemberTerritorySnapshots,
@@ -684,24 +685,19 @@ async function calculateMetricActual(territoryType: string, territoryId: string,
     .then((snapshot) => snapshot?.actualValue || 0);
 }
 
+/**
+ * Polling units in scope, through the one operational authority.
+ *
+ * This used to walk `ward.stateConstituency` itself, without the reviewed-edge
+ * predicate the dashboard applies. That made the coverage denominator count
+ * polling units behind unreviewed inferred edges while the member metrics in the
+ * same snapshot excluded every member on those wards — and the snapshot was
+ * still stamped with the current scope version, certifying semantics it had not
+ * used. There is one definition now, and it lives in member-territory-scope.
+ */
 async function countPollingUnitsInScope(territoryType: string, territoryId: string) {
-  if (territoryType === "STATE") {
-    return prisma.pollingUnit.count({ where: { stateId: territoryId } });
-  }
-  if (territoryType === "WARD") {
-    return prisma.pollingUnit.count({ where: { wardId: territoryId } });
-  }
-  if (territoryType === "POLLING_UNIT") {
-    return prisma.pollingUnit.count({ where: { id: territoryId } });
-  }
-  if (territoryType === "STATE_CONSTITUENCY") {
-    return prisma.pollingUnit.count({ where: { ward: { stateConstituencyId: territoryId } } });
-  }
-  if (territoryType === "FEDERAL_CONSTITUENCY") {
-    return prisma.pollingUnit.count({ where: { ward: { stateConstituency: { federalConstituencyId: territoryId } } } });
-  }
   return prisma.pollingUnit.count({
-    where: { ward: { stateConstituency: { federalConstituency: { senatorialDistrictId: territoryId } } } },
+    where: buildOperationalPollingUnitTerritoryWhere(territoryType, territoryId),
   });
 }
 
@@ -2713,6 +2709,13 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
     }),
   );
 
+  /**
+   * Score and trend both come from this list. Taking `latest` from the filtered
+   * snapshots and the comparand from the raw ones is how an obsolete zero
+   * became the "previous" score, reporting a change of calculation generation
+   * as campaign progress — and, with a genuine decline in between, inverting
+   * its sign.
+   */
   const compatibleSnapshots = selectCurrentMemberTerritorySnapshots(latestSnapshots, 2);
   const latest = compatibleSnapshots[0] || null;
   return response.json({
@@ -2724,7 +2727,7 @@ router.get("/strength/dashboard", requireAuth, async (request, response) => {
             ...latest,
             score: latest.score.toString(),
             calculatedAt: latest.calculatedAt.toISOString(),
-            trend: trendFromScores(latest.score, latestSnapshots[1]?.score),
+            trend: trendFromScores(latest.score, compatibleSnapshots[1]?.score),
           }
         : null,
       targetProgress,

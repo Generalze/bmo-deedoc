@@ -123,24 +123,71 @@ if (!scopeAuthority.includes("selectCurrentMemberTerritorySnapshots")) {
 }
 
 /**
- * Every strength surface must select snapshots through that one authority. The
- * dashboard rejecting obsolete snapshots while the pre-election surfaces
- * displayed them is exactly how the same territory came to show two different
- * scores at the same moment.
+ * Every strength surface must select snapshots through that one authority, and
+ * must then use what it selected.
+ *
+ * This check used to compare a count of snapshot reads against a count of
+ * `selectCurrentMemberTerritorySnapshots` occurrences. That is a cardinality
+ * test standing in for a dataflow test, and the import statement itself counted
+ * toward the threshold — so it passed a file that filtered a snapshot list and
+ * then handed the *raw* list to the trend calculation. Counting occurrences
+ * proves nothing about which value is used, so it is gone.
+ *
+ * What is checked instead is architectural and specific: the raw result of a
+ * snapshot query must never be indexed into. Naming the filtered list is the
+ * only way to reach a snapshot, so a regression has to be written in a form
+ * this can see.
  */
 const SNAPSHOT_CONSUMERS = [
   join("apps", "api", "src", "routes", "dashboard.ts"),
   join("apps", "api", "src", "routes", "pre-election.ts"),
 ];
+
+/** Variables holding an unfiltered snapshot query result. */
+const RAW_SNAPSHOT_BINDINGS = ["latestSnapshots", "snapshotCandidates", "previousCandidates", "candidateSnapshots"];
+
 for (const consumer of SNAPSHOT_CONSUMERS) {
   const source = readFileSync(join(repoRoot, consumer), "utf8");
-  const reads = (source.match(/territoryStrengthSnapshot\s*\.?\s*\n?\s*\.(findMany|findFirst)/g) || []).length;
-  const selections = (source.match(/selectCurrentMemberTerritorySnapshots/g) || []).length;
-  if (reads > 0 && selections < reads) {
+  const readsSnapshots = /territoryStrengthSnapshot\s*\n?\s*\.(findMany|findFirst)/.test(source);
+  if (!readsSnapshots) {
+    continue;
+  }
+  if (!source.includes("selectCurrentMemberTerritorySnapshots")) {
+    failures.push(`${consumer} reads TerritoryStrengthSnapshot without the shared compatibility authority.`);
+    continue;
+  }
+  for (const binding of RAW_SNAPSHOT_BINDINGS) {
+    if (source.includes(`${binding}[`)) {
+      failures.push(
+        `${consumer} indexes into the raw snapshot list '${binding}'. Score and trend must both come from the filtered result, ` +
+          "or an obsolete snapshot becomes the previous score and a change of calculation generation reads as a trend.",
+      );
+    }
+  }
+}
+
+/**
+ * And no route may keep its own constituency polling-unit scope. The strength
+ * snapshot's coverage denominator walked the ward graph without the
+ * reviewed-edge predicate while the dashboard applied it, so a snapshot could
+ * be stamped with the current scope version having not used it.
+ */
+for (const consumer of SNAPSHOT_CONSUMERS) {
+  const source = readFileSync(join(repoRoot, consumer), "utf8");
+  const normalised = source.replace(/\s+/g, " ");
+  if (normalised.includes("ward: { stateConstituency")) {
     failures.push(
-      `${consumer} reads TerritoryStrengthSnapshot ${reads} time(s) but routes only ${selections} through the shared compatibility authority.`,
+      `${consumer} walks ward -> stateConstituency directly; constituency polling-unit scope belongs to buildOperationalPollingUnitTerritoryWhere.`,
     );
   }
+}
+
+const PRE_ELECTION = join("apps", "api", "src", "routes", "pre-election.ts");
+const preElectionSource = readFileSync(join(repoRoot, PRE_ELECTION), "utf8");
+if (!preElectionSource.includes("buildOperationalPollingUnitTerritoryWhere")) {
+  failures.push(
+    `${PRE_ELECTION} does not scope polling units through the shared authority; a snapshot could be stamped with the current scope version without using it.`,
+  );
 }
 
 for (const consumer of SCOPE_CONSUMERS) {

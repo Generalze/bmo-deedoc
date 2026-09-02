@@ -1089,6 +1089,184 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
     },
   },
   {
+    name: "the strength dashboard derives score and trend only from the current generation",
+    run: async () => {
+      // R1. `latest` came from the filtered list while the comparand came from
+      // the raw one, so an obsolete zero became the previous score.
+      const officerEmail = email("r1-officer");
+      await prisma.user.create({
+        data: {
+          name: "Ancestry R1 Officer",
+          email: officerEmail,
+          passwordHash: await hashPassword(password),
+          role: "STATE_OFFICER",
+          coordinatorProfile: { create: { level: "STATE_CONSTITUENCY", stateId: OGUN_STATE_ID } },
+        },
+      });
+      const session = await apiRequest("/auth/login", { method: "POST", body: { email: officerEmail, password } });
+      const token = (session.payload as { token: string }).token;
+      const query = `territoryType=STATE_CONSTITUENCY&territoryId=${expected.stateConstituencyId}`;
+
+      const made: string[] = [];
+      const snapshot = async (score: number, versioned: boolean, minutesAgo: number) => {
+        const row = await prisma.territoryStrengthSnapshot.create({
+          data: {
+            territoryType: "STATE_CONSTITUENCY",
+            territoryId: expected.stateConstituencyId,
+            score: new Prisma.Decimal(score),
+            breakdownJson: versioned
+              ? { memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION, metrics: [] }
+              : [{ metric: "REGISTERED_MEMBERS", actualValue: 0 }],
+            calculatedAt: new Date(Date.now() - minutesAgo * 60_000),
+          },
+        });
+        made.push(row.id);
+        return row;
+      };
+
+      /** Both current-strength surfaces, which must agree. */
+      const read = async () => {
+        const dash = await apiRequest(`/pre-election/strength/dashboard?${query}`, { token });
+        assert.equal(dash.status, 200, JSON.stringify(dash.payload));
+        const snapshotPayload = (
+          dash.payload as { dashboard: { latestStrengthSnapshot: { score: string; trend: string } | null } }
+        ).dashboard.latestStrengthSnapshot;
+        const latest = await apiRequest(`/pre-election/strength/snapshots/latest?${query}`, { token });
+        const latestPayload = (latest.payload as { strengthSnapshot: { score: string; trend: string } | null })
+          .strengthSnapshot;
+        assert.deepEqual(
+          { score: snapshotPayload?.score ?? null, trend: snapshotPayload?.trend ?? null },
+          { score: latestPayload?.score ?? null, trend: latestPayload?.trend ?? null },
+          "the two current-strength surfaces must not disagree about the same territory",
+        );
+        return snapshotPayload;
+      };
+
+      const clear = async () => {
+        await prisma.territoryStrengthSnapshot.deleteMany({ where: { id: { in: made.splice(0, made.length) } } });
+      };
+
+      try {
+        // 5. Only obsolete snapshots: nothing obsolete may be exposed as current.
+        await snapshot(0, false, 40);
+        assert.equal(await read(), null, "an obsolete snapshot is not a current score");
+        await clear();
+
+        // 1. [62 current, 0 unversioned] -> no fictional IMPROVING.
+        await snapshot(0, false, 40);
+        await snapshot(62, true, 30);
+        let view = await read();
+        assert.equal(view?.score, "62");
+        assert.notEqual(view?.trend, "IMPROVING", "an obsolete zero must not manufacture an improvement");
+        assert.equal(view?.trend, "STABLE", "with no comparable previous snapshot there is no trend");
+        await clear();
+
+        // 2. [62 current, 0 unversioned, 68 current] -> DECLINING, not sign-inverted.
+        await snapshot(68, true, 40);
+        await snapshot(0, false, 30);
+        await snapshot(62, true, 20);
+        view = await read();
+        assert.equal(view?.score, "62");
+        assert.equal(view?.trend, "DECLINING", "68 -> 62 is a decline; an interleaved obsolete 0 must not invert its sign");
+        await clear();
+
+        // 3. [62 current, 0 unversioned, 50 current] -> IMPROVING.
+        await snapshot(50, true, 40);
+        await snapshot(0, false, 30);
+        await snapshot(62, true, 20);
+        view = await read();
+        assert.equal(view?.trend, "IMPROVING", "50 -> 62 is a real improvement");
+        await clear();
+
+        // 4. [62 current, 62 current] -> STABLE.
+        await snapshot(62, true, 40);
+        await snapshot(62, true, 30);
+        view = await read();
+        assert.equal(view?.trend, "STABLE");
+      } finally {
+        await clear();
+      }
+    },
+  },
+  {
+    name: "a current-version snapshot cannot draw coverage from unreviewed polling units",
+    run: async () => {
+      // R2. The version stamp must be true: every member-territory input to the
+      // score has to use the semantics the stamp names.
+      const superAdminToken = await (async () => {
+        const login = await apiRequest("/auth/login", {
+          method: "POST",
+          body: { email: "superadmin@pics.ng", password: "ChangeMe123!" },
+        });
+        assert.equal(login.status, 200, JSON.stringify(login.payload));
+        return (login.payload as { token: string }).token;
+      })();
+
+      const wholly = await prisma.stateConstituency.findFirst({
+        where: {
+          stateId: OGUN_STATE_ID,
+          federalConstituencyId: { not: null },
+          wards: { some: { pollingUnits: { some: {} } }, every: { stateConstituencyEdgeInferred: true } },
+        },
+        orderBy: { id: "asc" },
+        select: { id: true },
+      });
+      assert.ok(wholly, "a wholly unreviewed constituency is required");
+
+      const rawPollingUnits = await prisma.pollingUnit.count({ where: { ward: { stateConstituencyId: wholly.id } } });
+      assert.ok(rawPollingUnits > 0, "it must have polling units in the raw graph");
+
+      await apiRequest("/pre-election/strength/metrics", {
+        method: "POST",
+        token: superAdminToken,
+        body: { metric: "POLLING_UNIT_COVERAGE", weight: "1", active: true },
+      });
+
+      const calculated = await apiRequest("/pre-election/strength/snapshots/calculate", {
+        method: "POST",
+        token: superAdminToken,
+        body: { territoryType: "STATE_CONSTITUENCY", territoryId: wholly.id },
+      });
+      assert.equal(calculated.status, 201, JSON.stringify(calculated.payload));
+      const created = (
+        calculated.payload as {
+          strengthSnapshot: { id: string; breakdown: Array<{ metric: string; actualValue: number }> };
+        }
+      ).strengthSnapshot;
+      try {
+        const coverage = created.breakdown.find((item) => item.metric === "POLLING_UNIT_COVERAGE");
+        if (coverage) {
+          assert.equal(
+            coverage.actualValue,
+            0,
+            `coverage must be 0 where no polling unit is operationally placeable, not derived from ${rawPollingUnits} blocked units`,
+          );
+        }
+        const members = created.breakdown.find((item) => item.metric === "REGISTERED_MEMBERS");
+        if (members) {
+          assert.equal(members.actualValue, 0, "and no member is placeable there either");
+        }
+
+        // The stamp must describe the calculation it was applied to.
+        const stored = await prisma.territoryStrengthSnapshot.findUniqueOrThrow({
+          where: { id: created.id },
+          select: { breakdownJson: true },
+        });
+        assert.equal(
+          (stored.breakdownJson as { memberTerritoryScopeVersion?: string }).memberTerritoryScopeVersion,
+          MEMBER_TERRITORY_SCOPE_VERSION,
+        );
+      } finally {
+        await prisma.territoryStrengthSnapshot.delete({ where: { id: created.id } });
+        await apiRequest("/pre-election/strength/metrics", {
+          method: "POST",
+          token: superAdminToken,
+          body: { metric: "POLLING_UNIT_COVERAGE", weight: "1", active: false },
+        });
+      }
+    },
+  },
+  {
     name: "an unknown territory type fails closed rather than scoping to everything",
     run: async () => {
       // A scoping authority that returns undefined reaches Prisma as
