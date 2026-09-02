@@ -1267,6 +1267,141 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
     },
   },
   {
+    name: "target progress and the strength dashboard agree, and an obsolete metric snapshot is not current",
+    run: async () => {
+      // The last F gap: /strength/targets/progress served a stored actual with
+      // no scope-version gate while /strength/dashboard recomputed the same
+      // target live, so one number had two values.
+      const superAdminToken = await (async () => {
+        const login = await apiRequest("/auth/login", {
+          method: "POST",
+          body: { email: "superadmin@pics.ng", password: "ChangeMe123!" },
+        });
+        assert.equal(login.status, 200, JSON.stringify(login.payload));
+        return (login.payload as { token: string }).token;
+      })();
+
+      const territoryId = expected.stateConstituencyId;
+      const query = `territoryType=STATE_CONSTITUENCY&territoryId=${territoryId}`;
+
+      // A member exists in this constituency, so the canonical actual is > 0.
+      const liveMembers = await prisma.voterProfile.count({
+        where: {
+          ward: {
+            is: {
+              stateConstituencyId: territoryId,
+              OR: [{ stateConstituencyEdgeInferred: false }, { stateConstituencyEdgeReviewedAt: { not: null } }],
+            },
+          },
+        },
+      });
+      assert.ok(liveMembers > 0, "this suite must have registered a member in the target constituency");
+
+      const target = await apiRequest("/pre-election/strength/targets", {
+        method: "POST",
+        token: superAdminToken,
+        body: {
+          territoryType: "STATE_CONSTITUENCY",
+          territoryId,
+          metric: "REGISTERED_MEMBERS",
+          targetValue: 1000,
+          startDate: new Date().toISOString(),
+        },
+      });
+      assert.equal(target.status, 201, JSON.stringify(target.payload));
+      const targetId = (target.payload as { territoryTarget: { id: string } }).territoryTarget.id;
+
+      /** A stored actual from before member scope moved onto the ward graph. */
+      const obsolete = await prisma.territoryMetricSnapshot.create({
+        data: {
+          territoryType: "STATE_CONSTITUENCY",
+          territoryId,
+          metric: "REGISTERED_MEMBERS",
+          actualValue: 0,
+          metadataJson: { source: "PRE_ELECTION_API" },
+        },
+      });
+
+      const readProgress = async () => {
+        const result = await apiRequest(`/pre-election/strength/targets/progress?${query}`, { token: superAdminToken });
+        assert.equal(result.status, 200, JSON.stringify(result.payload));
+        const rows = (result.payload as { progress: Array<{ targetId: string; actualValue: number }> }).progress;
+        return rows.find((row) => row.targetId === targetId)?.actualValue ?? null;
+      };
+      const readDashboard = async () => {
+        const result = await apiRequest(`/pre-election/strength/dashboard?${query}`, { token: superAdminToken });
+        assert.equal(result.status, 200, JSON.stringify(result.payload));
+        const rows = (result.payload as { dashboard: { targetProgress: Array<{ targetId: string; actualValue: number }> } })
+          .dashboard.targetProgress;
+        return rows.find((row) => row.targetId === targetId)?.actualValue ?? null;
+      };
+
+      try {
+        const progress = await readProgress();
+        const dashboard = await readDashboard();
+        assert.notEqual(progress, 0, "an obsolete metric snapshot must not be served as the current actual");
+        assert.equal(progress, liveMembers, "with no compatible snapshot the value is recomputed canonically");
+        assert.equal(progress, dashboard, "the two endpoints must not disagree about the same target");
+
+        // The obsolete row is preserved, not rewritten or deleted.
+        const preserved = await prisma.territoryMetricSnapshot.findUniqueOrThrow({
+          where: { id: obsolete.id },
+          select: { actualValue: true, metadataJson: true },
+        });
+        assert.equal(preserved.actualValue, 0, "history is immutable");
+        assert.equal(
+          (preserved.metadataJson as { memberTerritoryScopeVersion?: string }).memberTerritoryScopeVersion,
+          undefined,
+          "an old snapshot must not be retro-stamped with a version it was not calculated under",
+        );
+
+        // A freshly calculated snapshot carries the version and is then usable.
+        // The metric must be active, or `calculate` writes no row for it.
+        await apiRequest("/pre-election/strength/metrics", {
+          method: "POST",
+          token: superAdminToken,
+          body: { metric: "REGISTERED_MEMBERS", weight: "1", active: true },
+        });
+        const calculated = await apiRequest("/pre-election/strength/snapshots/calculate", {
+          method: "POST",
+          token: superAdminToken,
+          body: { territoryType: "STATE_CONSTITUENCY", territoryId },
+        });
+        assert.equal(calculated.status, 201, JSON.stringify(calculated.payload));
+        const snapshotId = (calculated.payload as { strengthSnapshot: { id: string } }).strengthSnapshot.id;
+        try {
+          const fresh = await prisma.territoryMetricSnapshot.findFirst({
+            where: { territoryType: "STATE_CONSTITUENCY", territoryId, metric: "REGISTERED_MEMBERS" },
+            orderBy: { calculatedAt: "desc" },
+            select: { actualValue: true, metadataJson: true },
+          });
+          assert.equal(
+            (fresh?.metadataJson as { memberTerritoryScopeVersion?: string }).memberTerritoryScopeVersion,
+            MEMBER_TERRITORY_SCOPE_VERSION,
+            "a newly calculated metric snapshot records the scope it was calculated under",
+          );
+          assert.equal(
+            await readProgress(),
+            await readDashboard(),
+            "and the two endpoints still agree once a compatible snapshot exists",
+          );
+        } finally {
+          await prisma.territoryStrengthSnapshot.delete({ where: { id: snapshotId } });
+          await apiRequest("/pre-election/strength/metrics", {
+            method: "POST",
+            token: superAdminToken,
+            body: { metric: "REGISTERED_MEMBERS", weight: "1", active: false },
+          });
+        }
+      } finally {
+        await prisma.territoryMetricSnapshot.deleteMany({
+          where: { territoryType: "STATE_CONSTITUENCY", territoryId },
+        });
+        await prisma.territoryTarget.deleteMany({ where: { id: targetId } });
+      }
+    },
+  },
+  {
     name: "an unknown territory type fails closed rather than scoping to everything",
     run: async () => {
       // A scoping authority that returns undefined reaches Prisma as

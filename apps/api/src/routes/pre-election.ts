@@ -20,6 +20,7 @@ import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import {
   buildOperationalPollingUnitTerritoryWhere,
   buildOperationalVoterProfileTerritoryWhere,
+  isCurrentMemberTerritoryMetricSnapshot,
   MEMBER_TERRITORY_SCOPE_VERSION,
   selectCurrentMemberTerritorySnapshots,
   SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
@@ -2451,7 +2452,15 @@ router.post("/strength/snapshots/calculate", requireAuth, requireRole("SUPER_ADM
         metric: metricDefinition.metric,
         actualValue,
         calculatedAt: now,
-        metadataJson: { source: "PRE_ELECTION_API" },
+        /**
+         * Stamped with the member-scope semantics this value was calculated
+         * under, so a consumer can tell a current actual from one produced
+         * before member scope moved onto the ward graph.
+         */
+        metadataJson: {
+          source: "PRE_ELECTION_API",
+          memberTerritoryScopeVersion: MEMBER_TERRITORY_SCOPE_VERSION,
+        },
       },
     });
 
@@ -2564,11 +2573,24 @@ router.get("/strength/targets/progress", requireAuth, async (request, response) 
 
   const progress = await Promise.all(
     targets.map(async (target) => {
-      const latestSnapshot = await prisma.territoryMetricSnapshot.findFirst({
+      /**
+       * A stored actual is current only if it was calculated under the current
+       * member scope. An older one is a historical record, not this target's
+       * progress; where none exists the value is recomputed through the same
+       * `calculateMetricActual` path `/strength/dashboard` uses, so the two
+       * endpoints cannot disagree about the same target.
+       */
+      const metricSnapshots = await prisma.territoryMetricSnapshot.findMany({
         where: { territoryType: target.territoryType, territoryId: target.territoryId, metric: target.metric },
         orderBy: { calculatedAt: "desc" },
+        take: SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
       });
-      const actualValue = latestSnapshot?.actualValue || 0;
+      const compatibleSnapshot = metricSnapshots.find((snapshot) =>
+        isCurrentMemberTerritoryMetricSnapshot(snapshot),
+      );
+      const actualValue =
+        compatibleSnapshot?.actualValue ??
+        (await calculateMetricActual(target.territoryType, target.territoryId, target.metric));
       return {
         targetId: target.id,
         metric: target.metric,

@@ -201,6 +201,23 @@ export function selectCurrentMemberTerritorySnapshots<T extends { breakdownJson?
 }
 
 /**
+ * The same rule for a per-metric snapshot.
+ *
+ * `TerritoryMetricSnapshot` records one metric's value rather than a whole
+ * score, and has no column of its own to carry provenance — so the version is
+ * stamped into the `metadataJson` it already writes. Without this,
+ * `/strength/targets/progress` served a stored `REGISTERED_MEMBERS` actual
+ * calculated under the old member scope while `/strength/dashboard` recomputed
+ * the same target live, and the two endpoints disagreed about one number.
+ */
+export function isCurrentMemberTerritoryMetricSnapshot(
+  snapshot: { metadataJson?: unknown } | null | undefined,
+): boolean {
+  if (!snapshot) return false;
+  return snapshotScopeVersion(snapshot.metadataJson) === MEMBER_TERRITORY_SCOPE_VERSION;
+}
+
+/**
  * How many rows to read before filtering.
  *
  * Compatible snapshots are newest-first, but obsolete ones can sit on top of
