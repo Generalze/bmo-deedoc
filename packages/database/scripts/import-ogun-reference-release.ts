@@ -727,7 +727,7 @@ export async function applyIdentityRelease(
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
     const importedAt = new Date();
-    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0, inferredWardEdges: 0 };
+    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0, inferredWardEdges: 0, clearedEdgeApprovals: 0 };
 
     for (const item of payload.territories.filter((territory) => territory.kind === "LGA")) {
       await transactionAny.lGA.upsert({
@@ -802,12 +802,37 @@ export async function applyIdentityRelease(
     for (const item of payload.territories.filter((territory) => territory.kind === "WARD")) {
       /**
        * The import owns whether an edge was inferred; it never owns whether a
-       * human has since reviewed one. The review columns are deliberately
-       * absent from both branches so re-importing a release cannot revoke a
-       * completed review, and a ward that has dropped off the inferred list is
-       * cleared rather than left flagged.
+       * human has since reviewed one. The decision record and the review
+       * columns are absent from both branches, so re-importing a release
+       * cannot revoke a completed review, and a ward that has dropped off the
+       * inferred list is cleared rather than left flagged.
        */
       const inferenceBasis = payload.inferredWardEdges.get(item.canonicalId) ?? null;
+
+      /**
+       * An approval is about one edge, so it cannot survive that edge changing.
+       *
+       * If this release points the ward somewhere else than the row currently
+       * holds, any approval on it described the old mapping and is cleared —
+       * the new edge is unreviewed until a human looks at it. If the edge is
+       * unchanged, the approval stands, which is what makes re-importing the
+       * same release safe. Either way the decision history is untouched; only
+       * this projection moves.
+       */
+      const existing = await transactionAny.ward.findUnique({
+        where: { id: item.canonicalId },
+        select: { stateConstituencyId: true, stateConstituencyEdgeApprovedForId: true },
+      });
+      const edgeRepointed =
+        existing !== null && existing.stateConstituencyId !== item.stateConstituencyId;
+      const clearedApproval =
+        edgeRepointed && existing?.stateConstituencyEdgeApprovedForId
+          ? { stateConstituencyEdgeApprovedForId: null }
+          : {};
+      if (edgeRepointed && existing?.stateConstituencyEdgeApprovedForId) {
+        counts.clearedEdgeApprovals += 1;
+      }
+
       await transactionAny.ward.upsert({
         where: { id: item.canonicalId },
         update: {
@@ -822,6 +847,7 @@ export async function applyIdentityRelease(
           referenceImportedAt: importedAt,
           stateConstituencyEdgeInferred: inferenceBasis !== null,
           stateConstituencyEdgeInferenceBasis: inferenceBasis,
+          ...clearedApproval,
         },
         create: {
           id: item.canonicalId,

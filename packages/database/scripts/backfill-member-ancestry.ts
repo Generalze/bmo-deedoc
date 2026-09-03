@@ -76,7 +76,7 @@ export async function runMemberAncestryBackfill(
       lgaId: true,
       stateConstituencyId: true,
       stateConstituencyEdgeInferred: true,
-      stateConstituencyEdgeReviewedAt: true,
+      stateConstituencyEdgeApprovedForId: true,
       stateConstituency: {
         select: {
           id: true,
@@ -141,7 +141,15 @@ export async function runMemberAncestryBackfill(
      * from a sourced one — which is the whole reason the provenance columns
      * exist.
      */
-    if (ward.stateConstituencyEdgeInferred && !ward.stateConstituencyEdgeReviewedAt) {
+    /**
+     * Approved for this exact edge, or not repaired. A rejection also stamps a
+     * review timestamp, so a timestamp is not permission.
+     */
+    const edgeOperational =
+      !ward.stateConstituencyEdgeInferred ||
+      (ward.stateConstituencyEdgeApprovedForId !== null &&
+        ward.stateConstituencyEdgeApprovedForId === ward.stateConstituencyId);
+    if (!edgeOperational) {
       findings.push({
         ...base,
         bucket: "inferredEdgeUnreviewed",

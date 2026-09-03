@@ -351,7 +351,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       // mechanism releases the block, and reverts so nothing stays approved.
       await prisma.ward.update({
         where: { id: inferredWardId },
-        data: { stateConstituencyEdgeReviewedAt: new Date(), stateConstituencyEdgeReviewedBy: "ancestry-test" },
+        data: {
+          stateConstituencyEdgeApprovedForId: expected.stateConstituencyId,
+          stateConstituencyEdgeReviewedAt: new Date(),
+          stateConstituencyEdgeReviewedBy: "ancestry-test",
+        },
       });
       try {
         const created = await apiRequest("/auth/register-voter", {
@@ -364,7 +368,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       } finally {
         await prisma.ward.update({
           where: { id: inferredWardId },
-          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+          data: {
+            stateConstituencyEdgeApprovedForId: null,
+            stateConstituencyEdgeReviewedAt: null,
+            stateConstituencyEdgeReviewedBy: null,
+          },
         });
       }
     },
@@ -558,7 +566,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       const membersOnInferredWard = await registeredMembers(token, "WARD", inferredWardId);
       await prisma.ward.update({
         where: { id: inferredWardId },
-        data: { stateConstituencyEdgeReviewedAt: new Date(), stateConstituencyEdgeReviewedBy: "ancestry-test" },
+        data: {
+          stateConstituencyEdgeApprovedForId: expected.stateConstituencyId,
+          stateConstituencyEdgeReviewedAt: new Date(),
+          stateConstituencyEdgeReviewedBy: "ancestry-test",
+        },
       });
       try {
         for (const [level, territoryId] of constituencyLevels) {
@@ -571,7 +583,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       } finally {
         await prisma.ward.update({
           where: { id: inferredWardId },
-          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+          data: {
+            stateConstituencyEdgeApprovedForId: null,
+            stateConstituencyEdgeReviewedAt: null,
+            stateConstituencyEdgeReviewedBy: null,
+          },
         });
         await removeMember(placed);
       }
@@ -632,10 +648,16 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       );
       assert.equal(
         await prisma.ward.count({
-          where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeReviewedAt: { not: null } },
+          where: {
+            stateId: OGUN_STATE_ID,
+            OR: [
+              { stateConstituencyEdgeReviewedAt: { not: null } },
+              { stateConstituencyEdgeApprovedForId: { not: null } },
+            ],
+          },
         }),
         0,
-        "the migration must not review anything",
+        "the migration must neither review nor approve anything",
       );
 
       // And the gate it exists to feed is live: registration on a ward the
@@ -750,13 +772,17 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       const ward = await prisma.ward.findFirst({
         where: { stateId: OGUN_STATE_ID, stateConstituencyEdgeInferred: true, id: { not: inferredWardId } },
         orderBy: { id: "asc" },
-        select: { id: true, stateConstituencyEdgeInferenceBasis: true },
+        select: { id: true, stateConstituencyId: true, stateConstituencyEdgeInferenceBasis: true },
       });
       assert.ok(ward, "a release ward with an inferred edge is required");
       const reviewedAt = new Date();
       await prisma.ward.update({
         where: { id: ward.id },
-        data: { stateConstituencyEdgeReviewedAt: reviewedAt, stateConstituencyEdgeReviewedBy: "governance-test" },
+        data: {
+          stateConstituencyEdgeApprovedForId: ward.stateConstituencyId,
+          stateConstituencyEdgeReviewedAt: reviewedAt,
+          stateConstituencyEdgeReviewedBy: "governance-test",
+        },
       });
       try {
         const releaseDir = path.join(repoRoot, "packages/database/reference/ogun/ogun-identity-2026-08-12");
@@ -770,6 +796,7 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
           select: {
             stateConstituencyEdgeInferred: true,
             stateConstituencyEdgeInferenceBasis: true,
+            stateConstituencyEdgeApprovedForId: true,
             stateConstituencyEdgeReviewedAt: true,
             stateConstituencyEdgeReviewedBy: true,
           },
@@ -782,10 +809,19 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
           "re-import must never revoke a human review",
         );
         assert.equal(after.stateConstituencyEdgeReviewedBy, "governance-test");
+        assert.equal(
+          after.stateConstituencyEdgeApprovedForId,
+          ward.stateConstituencyId,
+          "and the approval itself survives, because the release did not move the edge",
+        );
       } finally {
         await prisma.ward.update({
           where: { id: ward.id },
-          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+          data: {
+            stateConstituencyEdgeApprovedForId: null,
+            stateConstituencyEdgeReviewedAt: null,
+            stateConstituencyEdgeReviewedBy: null,
+          },
         });
       }
     },
@@ -927,7 +963,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       const wards = await prisma.ward.findMany({ where: { stateConstituencyId: wholly.id }, select: { id: true } });
       await prisma.ward.updateMany({
         where: { id: { in: wards.map((ward) => ward.id) } },
-        data: { stateConstituencyEdgeReviewedAt: new Date(), stateConstituencyEdgeReviewedBy: "pu-scope-test" },
+        data: {
+          stateConstituencyEdgeApprovedForId: wholly.id,
+          stateConstituencyEdgeReviewedAt: new Date(),
+          stateConstituencyEdgeReviewedBy: "pu-scope-test",
+        },
       });
       try {
         const after = await tilesFor("STATE_CONSTITUENCY", wholly.id);
@@ -939,7 +979,11 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       } finally {
         await prisma.ward.updateMany({
           where: { id: { in: wards.map((ward) => ward.id) } },
-          data: { stateConstituencyEdgeReviewedAt: null, stateConstituencyEdgeReviewedBy: null },
+          data: {
+            stateConstituencyEdgeApprovedForId: null,
+            stateConstituencyEdgeReviewedAt: null,
+            stateConstituencyEdgeReviewedBy: null,
+          },
         });
       }
 

@@ -126,6 +126,41 @@ instead.
 action, not an engineering one. Until it happens, those 55 wards cannot register
 members and existing members on them are reported but never repaired.
 
+### The review itself
+
+`POST /governance/inferred-edges/:wardId/approve` and `.../reject`, Super Admin
+only, one edge at a time. There is deliberately no bulk decision: approving 55
+inferences in one action is indistinguishable from not reviewing them.
+
+A decision names the exact State Constituency the reviewer was shown, and the
+server compares it against the ward's current edge before recording anything —
+if a release re-points the ward between the screen loading and the button being
+pressed, the submission is refused with `EDGE_CHANGED_RELOAD` rather than
+applied to a mapping nobody looked at. An approval is stored as
+`Ward.stateConstituencyEdgeApprovedForId`, and the importer clears it whenever
+it moves the edge, so an approval can never follow a ward to a constituency
+nobody approved.
+
+**A review timestamp is not permission.** A rejection is a decision too and
+stamps `stateConstituencyEdgeReviewedAt` like an approval does, so
+`isWardConstituencyEdgeOperational` keys on the approved constituency id and
+nothing may read the timestamp as authority:
+
+| State | Operational |
+|---|---|
+| Sourced edge | Yes |
+| Inferred, approved for this exact edge | Yes |
+| Inferred, approved for a different edge | No |
+| Inferred, rejected | No |
+| Inferred, undecided | No |
+
+Rejection records that a human looked and said no. It never writes
+`Ward.stateConstituencyId`: correcting a wrong mapping is a reference-data
+change, and the importer owns that column. Every decision writes an `AuditLog`
+entry carrying the edge, the reason, the inference basis and the member and
+coordinator counts at the time. Coordinators are reported for decision impact
+and are never modified — coordinator territory provenance is separate work.
+
 ## Backfill
 
 `npm run backfill:member-ancestry -- --dry-run`

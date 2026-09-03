@@ -40,6 +40,11 @@ enum ReferenceDataImportKind {
   OGUN_POLLING_UNIT_GEODATA
 }
 
+enum WardConstituencyEdgeReviewOutcome {
+  APPROVED
+  REJECTED
+}
+
 enum ReferenceDataImportStatus {
   STAGED
   APPLIED
@@ -630,6 +635,7 @@ model User {
   initiatedVoiceCalls        VoiceCall[]                   @relation("VoiceCallInitiator")
   voiceCallParticipations    VoiceCallParticipant[]        @relation("VoiceCallParticipantUser")
   voiceCallEventActions      VoiceCallEvent[]              @relation("VoiceCallEventActor")
+  wardEdgeReviews            WardConstituencyEdgeReview[]  @relation("WardConstituencyEdgeReviewer")
 
   @@index([role])
   @@index([isActive])
@@ -2668,6 +2674,16 @@ model Ward {
   referenceImportedAt      DateTime?
   stateConstituencyEdgeInferred       Boolean          @default(false)
   stateConstituencyEdgeInferenceBasis String?
+  /// The State Constituency a human approved for this ward, or null.
+  ///
+  /// Set only by an APPROVED governance decision, and cleared by the importer
+  /// whenever it re-points the ward, so a non-null value always describes the
+  /// edge the ward currently has. That is what lets the operational filter be a
+  /// null check rather than a comparison between two columns, which Prisma
+  /// cannot express in a relation filter.
+  stateConstituencyEdgeApprovedForId  String?
+  /// Last decision, for display only. Never authority: a REJECTED decision also
+  /// stamps these, so presence of a timestamp does not mean approved.
   stateConstituencyEdgeReviewedAt     DateTime?
   stateConstituencyEdgeReviewedBy     String?
   createdAt                DateTime                    @default(now())
@@ -2696,6 +2712,8 @@ model Ward {
   evidenceAssets           EvidenceAsset[]
   legalCases               LegalCase[]
 
+  constituencyEdgeReviews  WardConstituencyEdgeReview[]
+
   @@unique([lgaId, name])
   @@unique([stateId, sourceCodeNamespace, sourceCode])
   @@index([stateId])
@@ -2703,6 +2721,38 @@ model Ward {
   @@index([stateConstituencyId])
   @@index([referenceImportReleaseId])
   @@index([stateConstituencyEdgeInferred])
+  @@index([stateConstituencyEdgeApprovedForId])
+}
+
+/// One human decision about one Ward -> State Constituency edge.
+///
+/// Append-only. A decision is about the *edge*, not the ward: an approval names
+/// the exact State Constituency reviewed, so it cannot follow the ward if a
+/// later release re-points it. Rejection records that a human looked and said
+/// no; it never changes `Ward.stateConstituencyId`, because correcting the
+/// mapping is a reference-data action and the importer owns that column.
+model WardConstituencyEdgeReview {
+  id                       String                            @id @default(cuid())
+  wardId                   String
+  stateConstituencyId      String
+  outcome                  WardConstituencyEdgeReviewOutcome
+  reason                   String
+  /// The inference the reviewer was judging, copied at decision time so the
+  /// record still explains itself after a later release changes the basis.
+  inferenceBasis           String?
+  referenceReleaseId       String?
+  reviewerUserId           String
+  decidedAt                DateTime                          @default(now())
+  /// What the decision affected when it was made. The live governance list
+  /// recomputes current counts; these preserve what the reviewer was shown.
+  affectedMemberCount      Int                               @default(0)
+  affectedCoordinatorCount Int                               @default(0)
+  ward                     Ward                              @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  reviewer                 User                              @relation("WardConstituencyEdgeReviewer", fields: [reviewerUserId], references: [id])
+
+  @@index([wardId, decidedAt])
+  @@index([wardId, stateConstituencyId])
+  @@index([outcome])
 }
 
 model StateConstituency {

@@ -216,6 +216,50 @@ if (!dashboardSource.includes("buildOperationalPollingUnitTerritoryWhere")) {
   );
 }
 
+/**
+ * A review timestamp is not permission.
+ *
+ * Once a rejection also stamps `stateConstituencyEdgeReviewedAt`, anything
+ * reading that column as authority treats "a human said this mapping is wrong"
+ * as the thing that makes it usable. Authority is the approved constituency id.
+ */
+const EDGE_AUTHORITY_CONSUMERS = [
+  join("apps", "api", "src", "lib", "member-territory-scope.ts"),
+  join("apps", "api", "src", "lib", "member-ancestry.ts"),
+  join("packages", "database", "scripts", "backfill-member-ancestry.ts"),
+];
+for (const consumer of EDGE_AUTHORITY_CONSUMERS) {
+  const source = readFileSync(join(repoRoot, consumer), "utf8").replace(/\s+/g, " ");
+  if (/stateConstituencyEdgeReviewedAt(?!: true)/.test(source.replace(/stateConstituencyEdgeReviewedAt`/g, ""))) {
+    if (!source.includes("stateConstituencyEdgeApprovedForId")) {
+      failures.push(`${consumer} reads a review timestamp without the approved-edge id; a rejection would read as approval.`);
+    }
+  }
+  if (!source.includes("stateConstituencyEdgeApprovedForId")) {
+    failures.push(`${consumer} no longer consults the approved-edge id; this check would pass vacuously.`);
+  }
+}
+
+/** Governance decides; it never rewrites the mapping, and never in bulk. */
+const GOVERNANCE_ROUTE = join("apps", "api", "src", "routes", "edge-governance.ts");
+const governanceSource = readFileSync(join(repoRoot, GOVERNANCE_ROUTE), "utf8");
+if (!governanceSource.includes('requireRole("SUPER_ADMIN")')) {
+  failures.push(`${GOVERNANCE_ROUTE} does not restrict decisions to SUPER_ADMIN on the server.`);
+}
+if (/ward\.update\([^)]*stateConstituencyId:/s.test(governanceSource.replace(/\s+/g, " "))) {
+  failures.push(
+    `${GOVERNANCE_ROUTE} writes Ward.stateConstituencyId; correcting a mapping is a reference-data action, not a governance one.`,
+  );
+}
+for (const forbidden of ["approve-all", "bulkApprove", "updateMany"]) {
+  if (governanceSource.includes(forbidden)) {
+    failures.push(`${GOVERNANCE_ROUTE} contains '${forbidden}'; every inferred edge needs an individual decision.`);
+  }
+}
+if (!governanceSource.includes("EDGE_CHANGED_RELOAD")) {
+  failures.push(`${GOVERNANCE_ROUTE} no longer refuses a decision submitted against a stale edge.`);
+}
+
 /** The active identity release must carry inferred-edge provenance. */
 const RELEASE_MANIFEST = join(
   "packages", "database", "reference", "ogun", "ogun-identity-2026-08-12", "manifest.json",
@@ -239,4 +283,5 @@ console.log(`ancestry_authority=${ANCESTRY_AUTHORITY.split(sep).join("/")}`);
 console.log(`ancestry_fields_guarded=${ANCESTRY_FIELDS.length}`);
 console.log(`ancestry_scope_consumers=${SCOPE_CONSUMERS.length}`);
 console.log(`ancestry_snapshot_consumers=${SNAPSHOT_CONSUMERS.length}`);
+console.log(`edge_authority_consumers=${EDGE_AUTHORITY_CONSUMERS.length}`);
 console.log("ancestry_authority_integrity=ok");
