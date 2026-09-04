@@ -185,6 +185,21 @@ function referencingColumns(constraint) {
     .filter(Boolean);
 }
 
+/**
+ * The column a CHECK short-circuits on, when it has the shape
+ * `CHECK ((("col" IS NULL) OR (...)))`.
+ *
+ * That shape means the whole predicate is satisfied whenever `col` is NULL. If
+ * `col` is also added by the same migration and nullable, a previous image —
+ * which does not know the column exists and therefore writes NULL into it —
+ * cannot produce a row the constraint rejects. Returns null for any other
+ * shape, so an unrecognised CHECK is treated as restrictive.
+ */
+function checkNullGuardColumn(constraint) {
+  const match = /CHECK\s*\(+\s*\(*\s*"([^"]+)"\s+IS NULL\s*\)*\s+OR\s/i.exec(constraint);
+  return match ? match[1] : null;
+}
+
 /** Unique indexes, which restrict writes exactly as a unique constraint does. */
 function uniqueIndexSet() {
   const rows = psql(
@@ -309,18 +324,40 @@ function backwardIncompatibleChanges(before, after) {
       // rejected. Any other constraint on a live table stays a violation,
       // including a foreign key over a column that already held data.
       const referencing = referencingColumns(constraint);
-      const exempt =
-        constraint.includes("FOREIGN KEY") &&
-        referencing.length > 0 &&
-        referencing.every((column) => {
-          const identity = `${owner}.${column}`;
-          return !before.columns.has(identity) && after.columns.get(identity)?.nullable === "YES";
-        });
-      if (!exempt) {
+      const newAndNullable = (column) => {
+        const identity = `${owner}.${column}`;
+        return !before.columns.has(identity) && after.columns.get(identity)?.nullable === "YES";
+      };
+      const foreignKeyExempt =
+        constraint.includes("FOREIGN KEY") && referencing.length > 0 && referencing.every(newAndNullable);
+
+      /**
+       * The second exemption, on the same reasoning as the first and no wider.
+       *
+       * A CHECK of the form `("newcol" IS NULL) OR (...)` is satisfied outright
+       * whenever `newcol` is NULL. If `newcol` is added by this migration and
+       * nullable, a previous image writes NULL into it — it cannot do otherwise,
+       * not knowing the column — so every row that image can insert or update
+       * takes the first branch and passes. Nothing that used to succeed is
+       * rejected.
+       *
+       * The narrowness is the point: only this exact shape qualifies, only when
+       * the guard column is new and nullable. A CHECK over a column that already
+       * held data, or one whose predicate does not short-circuit on a new
+       * column, remains a violation.
+       */
+      const guard = checkNullGuardColumn(constraint);
+      const checkExempt = constraint.includes("CHECK") && guard !== null && newAndNullable(guard);
+
+      if (!foreignKeyExempt && !checkExempt) {
         problems.push(`constraint added over existing data: ${constraint}`);
         continue;
       }
-      notes.push(`nullable new-column foreign key on pre-existing ${owner}: ${constraint}`);
+      notes.push(
+        checkExempt
+          ? `new nullable column CHECK on pre-existing ${owner}, unreachable by a previous image: ${constraint}`
+          : `nullable new-column foreign key on pre-existing ${owner}: ${constraint}`,
+      );
       continue;
     }
     // The constraint sits on a new table, but a foreign key still reaches back

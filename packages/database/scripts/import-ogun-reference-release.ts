@@ -812,26 +812,29 @@ export async function applyIdentityRelease(
       /**
        * An approval is about one edge, so it cannot survive that edge changing.
        *
-       * If this release points the ward somewhere else than the row currently
-       * holds, any approval on it described the old mapping and is cleared —
-       * the new edge is unreviewed until a human looks at it. If the edge is
-       * unchanged, the approval stands, which is what makes re-importing the
-       * same release safe. Either way the decision history is untouched; only
-       * this projection moves.
+       * One conditional statement rather than read-then-decide-then-write: the
+       * previous shape asked whether an approval existed, then wrote much
+       * later, and an approval committed in between was preserved through a
+       * re-point — leaving the projection naming a constituency the ward no
+       * longer had. This clears and locks in the same statement, so a
+       * governance decision either lands before it and is cleared, or waits
+       * and then sees the new edge.
+       *
+       * `IS DISTINCT FROM` because a NULL edge on either side is a change, and
+       * ordinary inequality would answer NULL and clear nothing. An edge the
+       * release now calls sourced also drops the approval: an inferred-edge
+       * projection has no meaning on an edge nobody had to infer.
        */
-      const existing = await transactionAny.ward.findUnique({
-        where: { id: item.canonicalId },
-        select: { stateConstituencyId: true, stateConstituencyEdgeApprovedForId: true },
-      });
-      const edgeRepointed =
-        existing !== null && existing.stateConstituencyId !== item.stateConstituencyId;
-      const clearedApproval =
-        edgeRepointed && existing?.stateConstituencyEdgeApprovedForId
-          ? { stateConstituencyEdgeApprovedForId: null }
-          : {};
-      if (edgeRepointed && existing?.stateConstituencyEdgeApprovedForId) {
-        counts.clearedEdgeApprovals += 1;
-      }
+      const clearedEdgeApprovals = await transactionAny.$executeRaw`
+        UPDATE "Ward"
+           SET "stateConstituencyEdgeApprovedForId" = NULL
+         WHERE "id" = ${item.canonicalId}
+           AND "stateConstituencyEdgeApprovedForId" IS NOT NULL
+           AND (
+             "stateConstituencyId" IS DISTINCT FROM ${item.stateConstituencyId}
+             OR ${inferenceBasis === null}
+           )`;
+      counts.clearedEdgeApprovals += Number(clearedEdgeApprovals);
 
       await transactionAny.ward.upsert({
         where: { id: item.canonicalId },
@@ -847,7 +850,6 @@ export async function applyIdentityRelease(
           referenceImportedAt: importedAt,
           stateConstituencyEdgeInferred: inferenceBasis !== null,
           stateConstituencyEdgeInferenceBasis: inferenceBasis,
-          ...clearedApproval,
         },
         create: {
           id: item.canonicalId,

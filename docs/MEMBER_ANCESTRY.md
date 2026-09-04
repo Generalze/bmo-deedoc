@@ -154,6 +154,30 @@ nothing may read the timestamp as authority:
 | Inferred, rejected | No |
 | Inferred, undecided | No |
 
+**The database refuses a projection that names an edge the ward does not have.**
+`Ward_edge_approval_matches_current_edge_check` requires a non-null approval to
+sit on an inferred edge, with a non-null current constituency, equal to it. The
+inferred and non-null tests are spelled out rather than relying on
+`approvedForId IS NULL OR approvedForId = stateConstituencyId`, because a CHECK
+admits a row whose predicate evaluates to NULL — the short form would accept
+exactly the state it exists to forbid. That constraint is what makes the
+null-checking scope filter provably equivalent to the row rule instead of
+equivalent by argument: **the application transaction tries to preserve the
+invariant; the database makes violating it impossible.**
+
+Decisions are taken against a `SELECT … FOR UPDATE` on the ward, so an import
+re-pointing the edge mid-review is seen before the write rather than after it,
+and two reviewers deciding at once serialize on the same row. Decision time is
+assigned under that lock and forced past the previous decision, so "newest" is a
+fact rather than a race between two timestamps.
+
+**A decision governs only its own review subject** — ward, constituency,
+reference release and inference basis. A ward moved away and later moved back is
+offered for review again rather than inheriting the earlier verdict, and an
+approval whose projection has since been cleared reads as `PENDING`, not
+`APPROVED`, so a blocked ward can never hide from the queue. The earlier
+decision stays visible as history.
+
 Rejection records that a human looked and said no. It never writes
 `Ward.stateConstituencyId`: correcting a wrong mapping is a reference-data
 change, and the importer owns that column. Every decision writes an `AuditLog`

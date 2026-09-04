@@ -4,6 +4,9 @@ import { OGUN_STATE_ID } from "@pics-nigeria/shared";
 
 import { createAuditLog } from "../lib/audit";
 import { isWardConstituencyEdgeOperational } from "../lib/member-territory-scope";
+
+/** Either the pooled client or a transaction, so reads can happen under the lock. */
+type DecisionClient = Pick<typeof prisma, "wardConstituencyEdgeReview" | "voterProfile" | "coordinatorProfile">;
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 
@@ -78,15 +81,35 @@ async function loadWard(wardId: string) {
 }
 
 /**
- * The decision that currently applies, which is the newest one naming the edge
- * the ward has now. A decision about a mapping the ward no longer carries is
- * history, not a verdict on the present.
+ * What a decision was *about*.
+ *
+ * A judgement is only current if it was made about the thing being looked at
+ * now: this ward, this constituency, from this release, on this inference. A
+ * ward moved from A to B and later back to A is not still approved because the
+ * name matches — the evidence in between changed, and the reviewer never saw
+ * that. Binding the subject this way is what stops an old approval reappearing
+ * as the current verdict and quietly dropping the edge out of the queue.
  */
-async function currentDecisionFor(ward: { id: string; stateConstituencyId: string | null }) {
+type ReviewSubject = {
+  id: string;
+  stateConstituencyId: string | null;
+  referenceImportReleaseId: string | null;
+  stateConstituencyEdgeInferenceBasis: string | null;
+};
+
+async function currentDecisionFor(ward: ReviewSubject, client: DecisionClient = prisma) {
   if (!ward.stateConstituencyId) return null;
-  return prisma.wardConstituencyEdgeReview.findFirst({
-    where: { wardId: ward.id, stateConstituencyId: ward.stateConstituencyId },
-    orderBy: { decidedAt: "desc" },
+  return client.wardConstituencyEdgeReview.findFirst({
+    where: {
+      wardId: ward.id,
+      stateConstituencyId: ward.stateConstituencyId,
+      referenceReleaseId: ward.referenceImportReleaseId,
+      inferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
+    },
+    // `decidedAt` is assigned under the row lock and forced to advance, so it
+    // orders decisions; `id` only breaks a tie that cannot occur, so that the
+    // query is deterministic rather than merely usually right.
+    orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
     select: {
       id: true,
       outcome: true,
@@ -100,13 +123,26 @@ async function currentDecisionFor(ward: { id: string; stateConstituencyId: strin
   });
 }
 
+/**
+ * An edge is APPROVED only while the projection still says so.
+ *
+ * A historical approval whose projection the importer has since cleared is
+ * history, not the current state — reporting it as APPROVED would hide a ward
+ * that is actually blocked from the queue of things needing a decision, which
+ * is the dead end this whole surface exists to remove.
+ */
 function reviewStateOf(
-  ward: { stateConstituencyEdgeInferred: boolean },
+  ward: {
+    stateConstituencyId: string | null;
+    stateConstituencyEdgeInferred: boolean;
+    stateConstituencyEdgeApprovedForId: string | null;
+  },
   decision: { outcome: "APPROVED" | "REJECTED" } | null,
 ): ReviewState {
   if (!ward.stateConstituencyEdgeInferred) return "APPROVED";
-  if (!decision) return "PENDING";
-  return decision.outcome;
+  if (isWardConstituencyEdgeOperational(ward)) return "APPROVED";
+  if (decision?.outcome === "REJECTED") return "REJECTED";
+  return "PENDING";
 }
 
 /**
@@ -116,10 +152,10 @@ function reviewStateOf(
  * time; these are what is true now. Showing a stale number to someone about to
  * make an irreversible-feeling judgement would be worse than showing none.
  */
-async function impactOf(ward: { id: string; stateConstituencyId: string | null }) {
+async function impactOf(ward: { id: string; stateConstituencyId: string | null }, client: DecisionClient = prisma) {
   const [members, coordinators] = await Promise.all([
-    prisma.voterProfile.count({ where: { wardId: ward.id } }),
-    prisma.coordinatorProfile.count({
+    client.voterProfile.count({ where: { wardId: ward.id } }),
+    client.coordinatorProfile.count({
       where: ward.stateConstituencyId
         ? { OR: [{ wardId: ward.id }, { stateConstituencyId: ward.stateConstituencyId }] }
         : { wardId: ward.id },
@@ -251,6 +287,28 @@ router.get("/inferred-edges/:wardId", requireAuth, requireRole("SUPER_ADMIN"), a
   });
 });
 
+/** A refusal the route turns into a status code, raised from inside the lock. */
+class GovernanceRefusal extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(typeof body.message === "string" ? body.message : "Governance decision refused.");
+    this.name = "GovernanceRefusal";
+  }
+}
+
+type LockedWard = {
+  id: string;
+  stateId: string;
+  lgaId: string;
+  stateConstituencyId: string | null;
+  stateConstituencyEdgeInferred: boolean;
+  stateConstituencyEdgeInferenceBasis: string | null;
+  stateConstituencyEdgeApprovedForId: string | null;
+  referenceImportReleaseId: string | null;
+};
+
 async function decide(request: Request, response: Response, outcome: "APPROVED" | "REJECTED") {
   const parsed = decisionSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -258,103 +316,148 @@ async function decide(request: Request, response: Response, outcome: "APPROVED" 
   }
 
   const wardId = Array.isArray(request.params.wardId) ? request.params.wardId[0] : request.params.wardId;
-  const ward = await loadWard(wardId);
-  if (!ward || ward.stateId !== OGUN_STATE_ID) {
-    return response.status(404).json({ message: "Ward not found." });
-  }
-
-  if (!ward.stateConstituencyEdgeInferred) {
-    return response.status(400).json({
-      message: "This ward's State Constituency edge came from the source and needs no review.",
-      code: "EDGE_NOT_INFERRED",
-    });
-  }
-
-  /**
-   * The reviewer judged a specific mapping. If the ward now points somewhere
-   * else, that judgement cannot be transferred to the new edge without someone
-   * having looked at it, so the submission is refused rather than reinterpreted.
-   */
-  if (ward.stateConstituencyId !== parsed.data.stateConstituencyId) {
-    return response.status(409).json({
-      message:
-        "This ward's State Constituency changed since the review was opened. Reload and review the current edge.",
-      code: "EDGE_CHANGED_RELOAD",
-      reviewedStateConstituencyId: parsed.data.stateConstituencyId,
-      currentStateConstituencyId: ward.stateConstituencyId,
-    });
-  }
-
-  const impact = await impactOf(ward);
   const actorUserId = request.authUser!.id;
-  const decidedAt = new Date();
 
-  const review = await prisma.$transaction(async (transaction) => {
-    const created = await transaction.wardConstituencyEdgeReview.create({
-      data: {
-        wardId: ward.id,
-        stateConstituencyId: parsed.data.stateConstituencyId,
-        outcome,
-        reason: parsed.data.reason,
-        inferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
-        referenceReleaseId: ward.referenceImportReleaseId,
-        reviewerUserId: actorUserId,
-        decidedAt,
-        affectedMemberCount: impact.members,
-        affectedCoordinatorCount: impact.coordinators,
-      },
+  try {
+    const review = await prisma.$transaction(async (transaction) => {
+      /**
+       * Everything authoritative happens against a locked row.
+       *
+       * Reading the ward before the transaction and trusting it inside was a
+       * check-then-act: an import re-pointing the edge in between would leave
+       * an approval naming a constituency the ward no longer has — and the
+       * scope filters, which can only test that column for null, would have
+       * counted every member on the ward into a constituency nobody reviewed.
+       * The lock removes the window; the CHECK constraint removes the state.
+       */
+      const locked = await transaction.$queryRaw<LockedWard[]>`
+        SELECT "id",
+               "stateId",
+               "lgaId",
+               "stateConstituencyId",
+               "stateConstituencyEdgeInferred",
+               "stateConstituencyEdgeInferenceBasis",
+               "stateConstituencyEdgeApprovedForId",
+               "referenceImportReleaseId"
+          FROM "Ward"
+         WHERE "id" = ${wardId}
+           FOR UPDATE`;
+
+      const ward = locked[0];
+      if (!ward || ward.stateId !== OGUN_STATE_ID) {
+        throw new GovernanceRefusal(404, { message: "Ward not found." });
+      }
+
+      if (!ward.stateConstituencyEdgeInferred) {
+        throw new GovernanceRefusal(400, {
+          message: "This ward's State Constituency edge came from the source and needs no review.",
+          code: "EDGE_NOT_INFERRED",
+        });
+      }
+
+      /**
+       * The reviewer judged a specific mapping. If the ward now points
+       * somewhere else, that judgement cannot be transferred to the new edge
+       * without someone having looked at it, so the submission is refused
+       * rather than reinterpreted. Checked against the locked row, so an
+       * import that lands first is seen here rather than after the write.
+       */
+      if (ward.stateConstituencyId !== parsed.data.stateConstituencyId) {
+        throw new GovernanceRefusal(409, {
+          message:
+            "This ward's State Constituency changed since the review was opened. Reload and review the current edge.",
+          code: "EDGE_CHANGED_RELOAD",
+          reviewedStateConstituencyId: parsed.data.stateConstituencyId,
+          currentStateConstituencyId: ward.stateConstituencyId,
+        });
+      }
+
+      const impact = await impactOf(ward, transaction);
+      const previous = await currentDecisionFor(ward, transaction);
+
+      /**
+       * Decision time is taken after the lock, and forced past the previous
+       * decision on this subject. Two reviewers deciding at once serialize
+       * here, and "newest" is then a fact rather than a race between two
+       * `new Date()` calls that may not differ.
+       */
+      const now = new Date();
+      const decidedAt =
+        previous && previous.decidedAt >= now ? new Date(previous.decidedAt.getTime() + 1) : now;
+
+      const created = await transaction.wardConstituencyEdgeReview.create({
+        data: {
+          wardId: ward.id,
+          stateConstituencyId: parsed.data.stateConstituencyId,
+          outcome,
+          reason: parsed.data.reason,
+          inferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
+          referenceReleaseId: ward.referenceImportReleaseId,
+          reviewerUserId: actorUserId,
+          decidedAt,
+          affectedMemberCount: impact.members,
+          affectedCoordinatorCount: impact.coordinators,
+        },
+      });
+
+      /**
+       * Only an approval moves the projection the scope filters read. A
+       * rejection records the judgement and stamps the display columns, and
+       * the ward stays blocked — which is why nothing anywhere may treat a
+       * review timestamp as permission.
+       */
+      await transaction.ward.update({
+        where: { id: ward.id },
+        data: {
+          stateConstituencyEdgeApprovedForId: outcome === "APPROVED" ? parsed.data.stateConstituencyId : null,
+          stateConstituencyEdgeReviewedAt: decidedAt,
+          stateConstituencyEdgeReviewedBy: actorUserId,
+        },
+      });
+
+      await createAuditLog(transaction, {
+        actorUserId,
+        action: outcome === "APPROVED" ? "WARD_EDGE_REVIEW_APPROVED" : "WARD_EDGE_REVIEW_REJECTED",
+        targetType: "WARD_CONSTITUENCY_EDGE",
+        targetId: `${ward.id}:${parsed.data.stateConstituencyId}`,
+        metadata: {
+          reviewId: created.id,
+          outcome,
+          reason: parsed.data.reason,
+          inferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
+          referenceReleaseId: ward.referenceImportReleaseId,
+          affectedMemberCount: impact.members,
+          affectedCoordinatorCount: impact.coordinators,
+          previousReviewState: reviewStateOf(ward, previous),
+        },
+        territory: {
+          stateId: ward.stateId,
+          lgaId: ward.lgaId,
+          wardId: ward.id,
+          stateConstituencyId: parsed.data.stateConstituencyId,
+        },
+      });
+
+      return created;
     });
 
-    /**
-     * Only an approval moves the projection the scope filters read. A rejection
-     * records the judgement and stamps the display columns, and the ward stays
-     * blocked — which is why nothing anywhere may treat a review timestamp as
-     * permission.
-     */
-    await transaction.ward.update({
-      where: { id: ward.id },
-      data: {
-        stateConstituencyEdgeApprovedForId: outcome === "APPROVED" ? parsed.data.stateConstituencyId : null,
-        stateConstituencyEdgeReviewedAt: decidedAt,
-        stateConstituencyEdgeReviewedBy: actorUserId,
-      },
+    const refreshed = await loadWard(wardId);
+    return response.status(201).json({
+      message:
+        outcome === "APPROVED"
+          ? "Edge approved. Member ancestry may now be derived through it."
+          : "Edge rejected and recorded. The ward remains blocked until the reference data is corrected.",
+      reviewId: review.id,
+      edge: await serializeWard(refreshed!),
     });
-
-    await createAuditLog(transaction, {
-      actorUserId,
-      action: outcome === "APPROVED" ? "WARD_EDGE_REVIEW_APPROVED" : "WARD_EDGE_REVIEW_REJECTED",
-      targetType: "WARD_CONSTITUENCY_EDGE",
-      targetId: `${ward.id}:${parsed.data.stateConstituencyId}`,
-      metadata: {
-        reviewId: created.id,
-        outcome,
-        reason: parsed.data.reason,
-        inferenceBasis: ward.stateConstituencyEdgeInferenceBasis,
-        referenceReleaseId: ward.referenceImportReleaseId,
-        affectedMemberCount: impact.members,
-        affectedCoordinatorCount: impact.coordinators,
-        previousReviewState: reviewStateOf(ward, await currentDecisionFor(ward)),
-      },
-      territory: {
-        stateId: ward.stateId,
-        lgaId: ward.lgaId,
-        wardId: ward.id,
-        stateConstituencyId: parsed.data.stateConstituencyId,
-      },
-    });
-
-    return created;
-  });
-
-  const refreshed = await loadWard(ward.id);
-  return response.status(201).json({
-    message:
-      outcome === "APPROVED"
-        ? "Edge approved. Member ancestry may now be derived through it."
-        : "Edge rejected and recorded. The ward remains blocked until the reference data is corrected.",
-    reviewId: review.id,
-    edge: await serializeWard(refreshed!),
-  });
+  } catch (error) {
+    if (error instanceof GovernanceRefusal) {
+      // The transaction has already rolled back, so no review and no audit
+      // entry exists for a decision that was not taken.
+      return response.status(error.status).json(error.body);
+    }
+    throw error;
+  }
 }
 
 router.post("/inferred-edges/:wardId/approve", requireAuth, requireRole("SUPER_ADMIN"), (request, response) =>

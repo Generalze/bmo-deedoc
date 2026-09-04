@@ -59,3 +59,26 @@ ALTER TABLE "WardConstituencyEdgeReview" ADD CONSTRAINT "WardConstituencyEdgeRev
 
 -- AddForeignKey
 ALTER TABLE "WardConstituencyEdgeReview" ADD CONSTRAINT "WardConstituencyEdgeReview_reviewerUserId_fkey" FOREIGN KEY ("reviewerUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- The projection cannot describe an edge the ward does not have.
+--
+-- `stateConstituencyEdgeApprovedForId` is what every bulk scope filter reads,
+-- because Prisma cannot compare two columns of a row inside a relation filter.
+-- That only equals the real rule -- "approved for the edge this ward currently
+-- has" -- while the two stay in step, and application code kept in step by
+-- argument is application code that drifts under concurrency. So the database
+-- refuses the divergence instead.
+--
+-- Written with the inferred and non-null tests spelled out rather than as the
+-- shorter `approvedForId IS NULL OR approvedForId = stateConstituencyId`: a
+-- CHECK admits a row whose predicate evaluates to NULL, so with a NULL
+-- `stateConstituencyId` the short form would accept exactly the state it exists
+-- to forbid. An approval also has no meaning on a sourced edge, so carrying one
+-- there is refused too.
+ALTER TABLE "Ward" ADD CONSTRAINT "Ward_edge_approval_matches_current_edge_check" CHECK (
+  "stateConstituencyEdgeApprovedForId" IS NULL
+  OR (
+    "stateConstituencyEdgeInferred" = TRUE
+    AND "stateConstituencyId" IS NOT NULL
+    AND "stateConstituencyEdgeApprovedForId" = "stateConstituencyId"
+  )
+);

@@ -99,8 +99,37 @@ const SCOPE_CONSUMERS = [
 ];
 
 const scopeAuthority = readFileSync(join(repoRoot, SCOPE_AUTHORITY), "utf8");
-if (!scopeAuthority.includes("stateConstituencyEdgeReviewedAt")) {
-  failures.push(`${SCOPE_AUTHORITY} no longer applies the reviewed-edge predicate; this check would pass vacuously.`);
+
+/**
+ * Checked on code, never on prose.
+ *
+ * This used to assert the file merely *mentioned* `stateConstituencyEdgeReviewedAt`,
+ * which after the governance work was true only inside a comment — so deleting a
+ * paragraph would have failed CI while gutting the predicate would not. The
+ * facts below are structural: which column the filter permits on, and that the
+ * row rule compares the approval to the ward's current edge. What those rules
+ * *do* at runtime is proven by the integration suite and by a database
+ * constraint, not by reading source with a regular expression.
+ */
+const scopeAuthorityCode = scopeAuthority.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+if (!/OPERATIONAL_WARD_EDGE[\s\S]{0,400}stateConstituencyEdgeApprovedForId/.test(scopeAuthorityCode)) {
+  failures.push(
+    `${SCOPE_AUTHORITY}: OPERATIONAL_WARD_EDGE must permit on stateConstituencyEdgeApprovedForId. A review timestamp is stamped by a rejection too.`,
+  );
+}
+if (/OPERATIONAL_WARD_EDGE[\s\S]{0,400}stateConstituencyEdgeReviewedAt/.test(scopeAuthorityCode)) {
+  failures.push(
+    `${SCOPE_AUTHORITY}: OPERATIONAL_WARD_EDGE reads a review timestamp; a rejected edge would become operational.`,
+  );
+}
+if (
+  !/isWardConstituencyEdgeOperational[\s\S]{0,900}stateConstituencyEdgeApprovedForId\s*===\s*ward\.stateConstituencyId/.test(
+    scopeAuthorityCode,
+  )
+) {
+  failures.push(
+    `${SCOPE_AUTHORITY}: the row rule must compare the approval to the ward's current State Constituency.`,
+  );
 }
 if (!scopeAuthority.includes("MEMBER_TERRITORY_SCOPE_VERSION")) {
   failures.push(`${SCOPE_AUTHORITY} no longer declares a scope version; stale snapshots could not be rejected.`);
@@ -229,14 +258,9 @@ const EDGE_AUTHORITY_CONSUMERS = [
   join("packages", "database", "scripts", "backfill-member-ancestry.ts"),
 ];
 for (const consumer of EDGE_AUTHORITY_CONSUMERS) {
-  const source = readFileSync(join(repoRoot, consumer), "utf8").replace(/\s+/g, " ");
-  if (/stateConstituencyEdgeReviewedAt(?!: true)/.test(source.replace(/stateConstituencyEdgeReviewedAt`/g, ""))) {
-    if (!source.includes("stateConstituencyEdgeApprovedForId")) {
-      failures.push(`${consumer} reads a review timestamp without the approved-edge id; a rejection would read as approval.`);
-    }
-  }
-  if (!source.includes("stateConstituencyEdgeApprovedForId")) {
-    failures.push(`${consumer} no longer consults the approved-edge id; this check would pass vacuously.`);
+  const code = readFileSync(join(repoRoot, consumer), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+  if (!code.includes("stateConstituencyEdgeApprovedForId")) {
+    failures.push(`${consumer} does not consult the approved-edge id, so it cannot be applying the operational rule.`);
   }
 }
 
@@ -258,6 +282,37 @@ for (const forbidden of ["approve-all", "bulkApprove", "updateMany"]) {
 }
 if (!governanceSource.includes("EDGE_CHANGED_RELOAD")) {
   failures.push(`${GOVERNANCE_ROUTE} no longer refuses a decision submitted against a stale edge.`);
+}
+
+/**
+ * The invariant the application can only try to preserve, the database
+ * guarantees. Without this constraint the projection the scope filters read
+ * could name an edge the ward does not have, and no amount of care in the route
+ * would make the two encodings provably equivalent.
+ */
+const GOVERNANCE_MIGRATION = join(
+  "packages", "database", "prisma", "ogun-migrations",
+  "20260903090000_ward_constituency_edge_governance", "migration.sql",
+);
+const governanceMigration = readFileSync(join(repoRoot, GOVERNANCE_MIGRATION), "utf8");
+if (!governanceMigration.includes("Ward_edge_approval_matches_current_edge_check")) {
+  failures.push(`${GOVERNANCE_MIGRATION} no longer creates the approval/current-edge CHECK constraint.`);
+}
+for (const clause of [
+  '"stateConstituencyEdgeInferred" = TRUE',
+  '"stateConstituencyId" IS NOT NULL',
+  '"stateConstituencyEdgeApprovedForId" = "stateConstituencyId"',
+]) {
+  if (!governanceMigration.includes(clause)) {
+    failures.push(`${GOVERNANCE_MIGRATION}: the CHECK constraint is missing \`${clause}\`; a NULL edge would satisfy it.`);
+  }
+}
+
+/** The decision must be taken against a locked row, not a stale read. */
+if (!governanceSource.includes("FOR UPDATE")) {
+  failures.push(
+    `${GOVERNANCE_ROUTE} does not lock the ward row; the stale-edge check would be check-then-act.`,
+  );
 }
 
 /** The active identity release must carry inferred-edge provenance. */
