@@ -12,6 +12,7 @@ import {
   uploadAgentElectionReportPhoto,
 } from "../../../lib/api";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import { DataTable, EmptyRow, Field, PageHead, Panel, StateView, StatusPill, formatCount } from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const openingStatuses = [
@@ -156,140 +157,194 @@ export default function AgentElectionReportPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading election-day reporting...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Submit Polling Unit report" />
+        <StateView kind="loading" title="Loading election-day reporting…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load election-day reporting</h1>
-          <FeedbackBanner tone={feedback.tone} message={feedback.message || "Authentication is required."} />
-          <Link href="/agent/dashboard">Return to agent dashboard</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Submit Polling Unit report" />
+        <StateView
+          kind="error"
+          title="Unable to load election-day reporting"
+          detail={feedback.message || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/agent/dashboard">
+              Return to your dashboard
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Election-day reporting</p>
-        <h1>Submit polling-unit report</h1>
-        <p>Polling unit: {user.agentProfile?.pollingUnitId || "Not assigned"}</p>
-        <p className="muted">This report is locked to your assigned polling-unit territory.</p>
-      </section>
+    <main className="console-shell form-page">
+      <PageHead
+        title="Submit Polling Unit report"
+        lead={`Polling Unit: ${user.agentProfile?.pollingUnitId || "Not assigned"} · This report is locked to your assigned Polling Unit territory.`}
+        actions={
+          <Link className="btn" href="/agent/dashboard">
+            Back to dashboard
+          </Link>
+        }
+      />
 
-      <FeedbackBanner tone={feedback.tone} message={feedback.message} />
+      <div className="stack-4">
+        <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-      <section className="panel card">
-        <h2>Report details</h2>
-        <form className="form" onSubmit={handleSubmit}>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-            <label className="field">
-              <span>Report date</span>
-              <input type="date" value={form.reportDate} onChange={(event) => setForm({ ...form, reportDate: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Arrival confirmation time</span>
-              <input type="datetime-local" value={form.arrivalConfirmedAt} onChange={(event) => setForm({ ...form, arrivalConfirmedAt: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Opening status</span>
-              <select value={form.openingStatus} onChange={(event) => setForm({ ...form, openingStatus: event.target.value as typeof form.openingStatus })}>
-                {openingStatuses.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="field">
-            <span>Turnout observation</span>
-            <textarea rows={4} value={form.turnoutObservation} onChange={(event) => setForm({ ...form, turnoutObservation: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Incident notes</span>
-            <textarea rows={3} value={form.incidentNotes} onChange={(event) => setForm({ ...form, incidentNotes: event.target.value })} />
-          </label>
-          <label className="field">
-            <span>Remarks</span>
-            <textarea rows={3} value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
-          </label>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-            <label className="field">
-              <span>Arrival Photo</span>
-              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setArrivalPhoto(event.target.files?.[0] || null)} required />
-            </label>
-            <label className="field">
-              <span>Post-Counting Photo</span>
-              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setPostCountingPhoto(event.target.files?.[0] || null)} required />
-            </label>
-          </div>
-
-          <section className="panel card" style={{ padding: 18 }}>
-            <h2 style={{ marginTop: 0 }}>Top 5 party vote entry</h2>
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-              {voteEntries.map((entry, index) => (
-                <div key={`vote-entry-${index}`} className="field">
-                  <span>Party {index + 1}</span>
-                  <select value={entry.politicalPartyId} onChange={(event) => updateVoteEntry(index, { politicalPartyId: event.target.value })} required>
-                    <option value="">Select party</option>
-                    {parties.map((party) => (
-                      <option key={party.id} value={party.id}>{party.name}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={0}
-                    inputMode="numeric"
-                    placeholder="Votes"
-                    value={entry.votes}
-                    onChange={(event) => updateVoteEntry(index, { votes: event.target.value })}
-                    required
-                  />
-                </div>
-              ))}
+        <Panel title="Report details">
+          <form className="stack-3" onSubmit={handleSubmit}>
+            <div className="form-grid">
+              <Field label="Report date">
+                <input
+                  type="date"
+                  value={form.reportDate}
+                  onChange={(event) => setForm({ ...form, reportDate: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="Arrival confirmation time">
+                <input
+                  type="datetime-local"
+                  value={form.arrivalConfirmedAt}
+                  onChange={(event) => setForm({ ...form, arrivalConfirmedAt: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="Opening status">
+                <select
+                  value={form.openingStatus}
+                  onChange={(event) => setForm({ ...form, openingStatus: event.target.value as typeof form.openingStatus })}
+                >
+                  {openingStatuses.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </div>
-            {duplicatePartySelection ? <p className="error">Each vote entry must use a different party.</p> : null}
-          </section>
 
-          <div className="action-row">
-            <button className="button" type="submit" disabled={submitting}>
-              {submitting ? "Submitting..." : "Submit Election Report"}
-            </button>
-            <Link href="/agent/dashboard" className="button secondary">Back to Dashboard</Link>
-          </div>
-        </form>
-      </section>
+            <Field label="Turnout observation">
+              <textarea
+                rows={4}
+                value={form.turnoutObservation}
+                onChange={(event) => setForm({ ...form, turnoutObservation: event.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Incident notes" hint="Optional.">
+              <textarea
+                rows={3}
+                value={form.incidentNotes}
+                onChange={(event) => setForm({ ...form, incidentNotes: event.target.value })}
+              />
+            </Field>
+            <Field label="Remarks" hint="Optional.">
+              <textarea rows={3} value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
+            </Field>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Recent reports</h2>
-            <p className="muted">Your most recent election-day submissions and review status.</p>
-          </div>
-          <span className="status-pill">{reports.length} reports</span>
-        </div>
-        {reports.length === 0 ? (
-          <p className="muted">No election-day reports submitted yet.</p>
-        ) : (
-          <div className="reward-list">
-            {reports.map((report) => (
-              <article key={report.id} className="reward-item">
-                <strong>{new Date(report.reportDate).toLocaleDateString()} | {report.status}</strong>
-                <p className="muted">Opening: {report.openingStatus} | Arrival: {new Date(report.arrivalConfirmedAt).toLocaleString()}</p>
-                <p>{report.turnoutObservation}</p>
-                {report.reviewNote ? <p className="muted">Review note: {report.reviewNote}</p> : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+            <div className="form-grid">
+              <Field label="Arrival photo" hint="JPG, PNG or WebP.">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => setArrivalPhoto(event.target.files?.[0] || null)}
+                  required
+                />
+              </Field>
+              <Field label="Post-counting photo" hint="JPG, PNG or WebP.">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => setPostCountingPhoto(event.target.files?.[0] || null)}
+                  required
+                />
+              </Field>
+            </div>
+
+            <fieldset className="kpi" style={{ border: "1px solid var(--line)" }}>
+              <legend className="kpi-label">Top 5 party vote entry</legend>
+              <div className="form-grid">
+                {voteEntries.map((entry, index) => (
+                  <Field
+                    key={`vote-entry-${index}`}
+                    label={`Party ${index + 1}`}
+                    error={index === 0 && duplicatePartySelection ? "Each vote entry must use a different party." : undefined}
+                  >
+                    <select
+                      value={entry.politicalPartyId}
+                      onChange={(event) => updateVoteEntry(index, { politicalPartyId: event.target.value })}
+                      required
+                    >
+                      <option value="">Select party</option>
+                      {parties.map((party) => (
+                        <option key={party.id} value={party.id}>
+                          {party.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      placeholder="Votes"
+                      aria-label={`Votes for party ${index + 1}`}
+                      value={entry.votes}
+                      onChange={(event) => updateVoteEntry(index, { votes: event.target.value })}
+                      required
+                    />
+                  </Field>
+                ))}
+              </div>
+            </fieldset>
+
+            <div className="btn-row">
+              <button className="btn btn-primary" type="submit" disabled={submitting || duplicatePartySelection}>
+                {submitting ? "Submitting…" : "Submit election report"}
+              </button>
+            </div>
+          </form>
+        </Panel>
+
+        <Panel title="Your recent reports" meta={`${formatCount(reports.length)} submitted`} flush>
+          <DataTable
+            head={
+              <tr>
+                <th>Report date</th>
+                <th>Status</th>
+                <th>Opening</th>
+                <th>Arrival</th>
+                <th>Observation</th>
+              </tr>
+            }
+          >
+            {reports.length === 0 ? (
+              <EmptyRow colSpan={5}>No election-day reports submitted yet.</EmptyRow>
+            ) : (
+              reports.map((report) => (
+                <tr key={report.id}>
+                  <td>{new Date(report.reportDate).toLocaleDateString()}</td>
+                  <td>
+                    <StatusPill status={report.status} />
+                  </td>
+                  <td className="muted-text">{report.openingStatus.replace(/_/g, " ").toLowerCase()}</td>
+                  <td className="muted-text">{new Date(report.arrivalConfirmedAt).toLocaleString()}</td>
+                  <td className="muted-text">
+                    {report.turnoutObservation}
+                    {report.reviewNote ? <div>Review note: {report.reviewNote}</div> : null}
+                  </td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
+      </div>
     </main>
   );
 }

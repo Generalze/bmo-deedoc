@@ -22,6 +22,21 @@ import {
   updateAgentTask,
 } from "../../../lib/api";
 import { AGENT_TRACKING_EVENT_NAME } from "../../../components/agent-session-tracker";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  StatusPill,
+  formatCount,
+} from "../../../components/ui";
 import { clearSession, readSession } from "../../../lib/session";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
@@ -253,198 +268,279 @@ export default function AgentDashboardPage() {
       setError(caughtError instanceof Error ? caughtError.message : "Incident submission failed.");
     }
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading agent dashboard...</h1>
-          <p>Please wait while your field profile is prepared.</p>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Field dashboard" />
+        <StateView kind="loading" title="Preparing your field profile…" />
       </main>
     );
   }
 
   if (error || !user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load dashboard</h1>
-          <p className="error">{gpsGateError || error || "Authentication is required."}</p>
-          {gpsGateError ? (
-            <p>
-              <button className="button" type="button" onClick={() => window.location.reload()}>
-                Retry GPS check
-              </button>
-            </p>
-          ) : null}
-          <p>
-            <Link href="/login?field=1">Return to sign in</Link>
-          </p>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Field dashboard" />
+        <StateView
+          kind="error"
+          title="Unable to load your dashboard"
+          detail={gpsGateError || error || "Authentication is required."}
+          action={
+            <span className="btn-row">
+              {gpsGateError ? (
+                <button className="btn btn-primary" type="button" onClick={() => window.location.reload()}>
+                  Retry GPS check
+                </button>
+              ) : null}
+              <Link className="btn" href="/login?field=1">
+                Return to sign in
+              </Link>
+            </span>
+          }
+        />
       </main>
     );
   }
 
+  const openTasks = tasks.filter((task) => task.status !== "DONE");
+
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <h1>{user.name}</h1>
-        <p>
-          Assigned territory: <strong>{user.agentProfile?.stateId}</strong> | {user.agentProfile?.lgaId} |{" "}
-          {user.agentProfile?.wardId}
-        </p>
-        <p className="muted">Polling unit: {user.agentProfile?.pollingUnitId || "Not assigned"}</p>
-        <div className="action-row" style={{ marginTop: 12 }}>
-          <Link href="/agent/election-report" className="button">
-            Submit Election Report
-          </Link>
-          <button className="button secondary" type="button" onClick={() => void handleSignOut()}>
-            Sign out
-          </button>
-        </div>
-      </section>
-
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Recent Activity</h2>
-          <div className="value">{activities.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Open Tasks</h2>
-          <div className="value">{tasks.filter((task) => task.status !== "DONE").length}</div>
-        </article>
-      </section>
-
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Attendance</h2>
-          <div className="action-row">
-            <button className="button" type="button" onClick={() => void handleActivity("check-in")} disabled={locationPending}>
-              {locationPending ? "Waiting for GPS..." : "Check in"}
+    <main className="console-shell">
+      <PageHead
+        title={user.name}
+        lead="Field agent"
+        actions={
+          <>
+            <Link className="btn btn-primary" href="/agent/election-report">
+              Submit election report
+            </Link>
+            <button className="btn" type="button" onClick={() => void handleSignOut()}>
+              Sign out
             </button>
-            <button className="button secondary" type="button" onClick={() => void handleActivity("check-out")} disabled={locationPending}>
-              {locationPending ? "Waiting for GPS..." : "Check out"}
-            </button>
-          </div>
-          <p className="muted">Attendance records now use device GPS coordinates instead of typed location values.</p>
-          {activityMessage ? <p className="muted">{activityMessage}</p> : null}
-        </section>
+          </>
+        }
+      />
 
-        <section className="panel card">
-          <h2>Live Tracking</h2>
-          <p className="muted">Device GPS tracking runs automatically for your session and stops only when you sign out.</p>
-          {trackerStatus ? <p className="muted">{trackerStatus}</p> : null}
-          {lastPingAt ? <p className="muted">Last live ping: {new Date(lastPingAt).toLocaleString()}</p> : null}
-        </section>
-      </section>
+      <div className="stack-4">
+        <KpiRow>
+          <Kpi
+            label="Open tasks"
+            value={formatCount(openTasks.length)}
+            note={`${formatCount(tasks.length)} assigned in total`}
+            tone={openTasks.length > 0 ? "accent" : undefined}
+          />
+          <Kpi label="Recent activity" value={formatCount(activities.length)} note="Records you have logged" />
+          <Kpi
+            label="Polling Unit"
+            value={user.agentProfile?.pollingUnitId ? "Assigned" : "Not assigned"}
+            note={user.agentProfile?.pollingUnitId || "Ask your coordinator to assign one"}
+            tone={user.agentProfile?.pollingUnitId ? undefined : "warn"}
+          />
+        </KpiRow>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Quick Incident Submission</h2>
-          <form className="form" onSubmit={handleIncidentSubmit}>
-            <label className="field">
-              <span>Type</span>
-              <select value={incidentForm.type} onChange={(event) => setIncidentForm({ ...incidentForm, type: event.target.value })}>
-                {INCIDENT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-          <label className="field">
-            <span>Title</span>
-            <input value={incidentForm.title} onChange={(event) => setIncidentForm({ ...incidentForm, title: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Description</span>
-            <input value={incidentForm.description} onChange={(event) => setIncidentForm({ ...incidentForm, description: event.target.value })} required />
-          </label>
-            <label className="field">
-              <span>Severity</span>
-              <select value={incidentForm.severity} onChange={(event) => setIncidentForm({ ...incidentForm, severity: event.target.value })}>
-                {INCIDENT_SEVERITIES.map((severity) => (
-                  <option key={severity} value={severity}>
-                    {severity}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Polling Unit</span>
+        <PanelGrid>
+          <Panel title="Attendance">
+            <div className="stack-3">
+              <div className="btn-row">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => void handleActivity("check-in")}
+                  disabled={locationPending}
+                >
+                  {locationPending ? "Waiting for GPS…" : "Check in"}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => void handleActivity("check-out")}
+                  disabled={locationPending}
+                >
+                  {locationPending ? "Waiting for GPS…" : "Check out"}
+                </button>
+              </div>
+              <p className="muted-text">
+                Attendance uses device GPS coordinates rather than a typed location.
+              </p>
+              {activityMessage ? <Notice tone="ok" title={activityMessage} /> : null}
+            </div>
+          </Panel>
+
+          <Panel title="Live tracking">
+            <DetailList
+              rows={[
+                { label: "Status", value: trackerStatus || "Running for this session" },
+                {
+                  label: "Last ping",
+                  value: lastPingAt ? new Date(lastPingAt).toLocaleString() : "No ping yet",
+                },
+                {
+                  label: "Stops when",
+                  value: "You sign out. Tracking runs automatically while signed in.",
+                },
+              ]}
+            />
+          </Panel>
+
+          <Panel title="Assigned territory">
+            {/* These are identifiers, not names — the agent profile carries IDs
+                and this endpoint does not resolve them. Labelling them as IDs is
+                honest; inventing names here would not be. */}
+            <DetailList
+              rows={[
+                { label: "State ID", value: <span className="mono">{user.agentProfile?.stateId || "—"}</span> },
+                { label: "LGA ID", value: <span className="mono">{user.agentProfile?.lgaId || "—"}</span> },
+                { label: "Ward ID", value: <span className="mono">{user.agentProfile?.wardId || "—"}</span> },
+                {
+                  label: "Polling Unit ID",
+                  value: <span className="mono">{user.agentProfile?.pollingUnitId || "Not assigned"}</span>,
+                },
+              ]}
+            />
+          </Panel>
+        </PanelGrid>
+
+        <Panel title="Report an incident">
+          <form className="stack-3" onSubmit={handleIncidentSubmit}>
+            <div className="form-grid">
+              <Field label="Type">
+                <select
+                  value={incidentForm.type}
+                  onChange={(event) => setIncidentForm({ ...incidentForm, type: event.target.value })}
+                >
+                  {INCIDENT_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type.replaceAll("_", " ").toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Severity">
+                <select
+                  value={incidentForm.severity}
+                  onChange={(event) => setIncidentForm({ ...incidentForm, severity: event.target.value })}
+                >
+                  {INCIDENT_SEVERITIES.map((severity) => (
+                    <option key={severity} value={severity}>
+                      {severity.toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Field label="Title">
+              <input
+                value={incidentForm.title}
+                onChange={(event) => setIncidentForm({ ...incidentForm, title: event.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Description">
+              <textarea
+                rows={3}
+                value={incidentForm.description}
+                onChange={(event) => setIncidentForm({ ...incidentForm, description: event.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Polling Unit" hint="Leave blank to use the Polling Unit you are assigned to.">
               <input
                 value={incidentForm.pollingUnitId}
                 onChange={(event) => setIncidentForm({ ...incidentForm, pollingUnitId: event.target.value })}
-                placeholder={user.agentProfile?.pollingUnitId || "Assigned polling unit will be used"}
+                placeholder={user.agentProfile?.pollingUnitId || "Assigned Polling Unit will be used"}
               />
-            </label>
-          <button className="button" type="submit">Submit incident</button>
-        </form>
-        {incidentMessage ? <p className="muted">{incidentMessage}</p> : null}
-      </section>
+            </Field>
+            <div className="btn-row">
+              <button className="btn btn-primary" type="submit">
+                Submit incident
+              </button>
+            </div>
+            {incidentMessage ? <Notice tone="ok" title={incidentMessage} /> : null}
+          </form>
+        </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Assigned Tasks</h2>
-        {tasks.length === 0 ? (
-          <p className="muted">No tasks assigned yet.</p>
-        ) : (
-          <div className="reward-list">
-            {tasks.map((task) => (
-              <article key={task.id} className="reward-item">
-                <div className="section-head compact">
-                  <div>
+        <Panel title="Assigned tasks" meta={`${formatCount(openTasks.length)} open`}>
+          {tasks.length === 0 ? (
+            <StateView kind="empty" title="No tasks assigned yet" />
+          ) : (
+            /* Cards, not a table: this screen is used one-handed on a phone in
+               the field, where a horizontally scrolling table is unusable. */
+            <div className="stack-3">
+              {tasks.map((task) => (
+                <article key={task.id} className="kpi">
+                  <div className="split">
                     <strong>{task.title}</strong>
-                    <p className="muted">{task.priority} | {task.status}</p>
+                    <span className="split-end">
+                      <StatusPill status={task.status} />
+                    </span>
                   </div>
-                  <span className={`status-pill ${task.status === "DONE" ? "active" : task.status === "BLOCKED" ? "inactive" : ""}`}>{task.status}</span>
-                </div>
-                <p>{task.description}</p>
-                <p className="muted">
-                  Created by {task.creatorName} | Due {task.dueAt ? new Date(task.dueAt).toLocaleString() : "not set"}
-                </p>
-                <div className="action-row">
-                  <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "IN_PROGRESS")}>Start</button>
-                  <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "BLOCKED")}>Block</button>
-                  <button className="button" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "DONE")}>Complete</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                  <p className="muted-text">{task.description}</p>
+                  <p className="muted-text">
+                    {task.priority.toLowerCase()} · created by {task.creatorName} · due{" "}
+                    {task.dueAt ? new Date(task.dueAt).toLocaleString() : "not set"}
+                  </p>
+                  <div className="btn-row">
+                    <button className="btn btn-sm" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "IN_PROGRESS")}>
+                      Start
+                    </button>
+                    <button className="btn btn-sm" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "BLOCKED")}>
+                      Block
+                    </button>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      type="button"
+                      onClick={() => void handleTaskStatusUpdate(task.id, "DONE")}
+                    >
+                      Complete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Recent Own Activity</h2>
-        {activities.length === 0 ? (
-          <p className="muted">No activity recorded yet.</p>
-        ) : (
-          <div className="reward-list">
-            {activities.map((activity) => (
-              <article key={activity.id} className="reward-item">
-                <strong>{activity.type}</strong>
-                <p>{activity.note || "No note"}</p>
-                <p className="muted">{new Date(activity.createdAt).toLocaleString()}</p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+        <PanelGrid>
+          <Panel title="Your recent activity" flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Type</th>
+                  <th>Note</th>
+                  <th>When</th>
+                </tr>
+              }
+            >
+              {activities.length === 0 ? (
+                <EmptyRow colSpan={3}>No activity recorded yet.</EmptyRow>
+              ) : (
+                activities.map((activity) => (
+                  <tr key={activity.id}>
+                    <td>{activity.type.replace(/_/g, " ").toLowerCase()}</td>
+                    <td className="muted-text">{activity.note || "No note"}</td>
+                    <td className="muted-text">{new Date(activity.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Notifications</h2>
-        {notifications.length === 0 ? (
-          <p className="muted">No notifications yet.</p>
-        ) : (
-          <div className="reward-list">
-            {notifications.slice(0, 5).map((item) => (
-              <article key={item.id} className="reward-item">
-                <strong>{item.title}</strong>
-                <p>{item.message}</p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          <Panel title="Notifications">
+            {notifications.length === 0 ? (
+              <StateView kind="empty" title="No notifications yet" />
+            ) : (
+              <ul className="stack-3" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {notifications.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.title}</strong>
+                    <p className="muted-text">{item.message}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }

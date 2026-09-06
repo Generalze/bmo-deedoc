@@ -1,83 +1,21 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
-import { PublicAccessShell } from "../components/public-access-shell";
-import { loginUser } from "../lib/api";
-import { saveSession } from "../lib/session";
-
+/**
+ * The front door is /login, and only /login.
+ *
+ * This page was a fifth sign-in form left behind by the session consolidation.
+ * It carried its own rules: it accepted only VOTER and MEMBER, told everyone
+ * else "This login page is for members only" — which is not true of a
+ * coordinator or a payout officer, whose accounts are perfectly valid — and
+ * always routed to /dashboard instead of the role's own workspace. It also had
+ * no field-duty step, so it could not have granted an agent a session that
+ * satisfies the GPS gate even if it had let one through.
+ *
+ * Rather than teach a second door the same rules and risk them drifting apart
+ * again, it forwards. /login already states that it is one sign-in for members,
+ * coordinators, field agents and command staff, and it is the only place that
+ * decides who may sign in and where they land.
+ */
 export default function HomePage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const data = await loginUser(email, password);
-
-      if (data.user.role !== "VOTER" && data.user.role !== "MEMBER") {
-        setError("This login page is for members only.");
-        return;
-      }
-
-      saveSession(data.token);
-      router.push("/dashboard");
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Login failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <PublicAccessShell
-      currentAccess="VOTER"
-      brandSubtitle="Voter Access Portal"
-      authTitle="Voter Sign In"
-      authDescription="Sign in with your voter account to view your referral code, reward activity, and civic updates."
-      footerNote="New voter? Create your account or confirm your polling unit first."
-    >
-      <form className="starter-form" onSubmit={handleSubmit}>
-        <label className="starter-form__field">
-          <span>Email address</span>
-          <input
-            type="email"
-            placeholder="ada@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
-
-        <label className="starter-form__field">
-          <span>Password</span>
-          <input
-            type="password"
-            placeholder="Enter your password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </label>
-
-        {error ? <p className="error">{error}</p> : null}
-
-        <button type="submit" className="starter-form__submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in to your account"}
-        </button>
-
-        <p className="starter-form__meta">
-          <Link href="/register">Create voter account</Link> {" | "}
-          <Link href="/polling-units">Find polling unit location</Link>
-        </p>
-      </form>
-    </PublicAccessShell>
-  );
+  redirect("/login");
 }

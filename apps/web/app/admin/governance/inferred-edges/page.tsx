@@ -11,6 +11,20 @@ import {
 import { AdminNav } from "../../../../components/admin-nav";
 import { ConfirmDialog } from "../../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../../components/feedback-banner";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  StateView,
+  Toolbar,
+  formatCount,
+} from "../../../../components/ui";
 import { clearSession, readSession } from "../../../../lib/session";
 
 /**
@@ -107,12 +121,10 @@ export default function InferredEdgeGovernancePage() {
 
   if (profile && profile.role !== "SUPER_ADMIN") {
     return (
-      <main className="page">
+      <main className="console-shell">
         <AdminNav />
-        <section className="panel">
-          <h1>Inferred edge governance</h1>
-          <p className="muted">This review is restricted to the Super Admin.</p>
-        </section>
+        <PageHead title="Inferred constituency edges" />
+        <StateView kind="refused" title="Restricted" detail="This review is restricted to the Super Admin." />
       </main>
     );
   }
@@ -120,174 +132,190 @@ export default function InferredEdgeGovernancePage() {
   const reasonTooShort = reason.trim().length < 10;
 
   return (
-    <main className="page">
+    <main className="console-shell">
       <AdminNav />
 
-      <section className="panel">
-        <h1>Inferred constituency edges</h1>
-        <p className="muted">
-          These wards were matched to a State Constituency by inference rather than read from an authoritative
-          source. Until a reviewer confirms one, members on that ward cannot be given constituency ancestry and
-          are not counted at State Constituency, Federal Constituency or Senatorial District level.
-        </p>
-        <p className="muted">
-          Approving records that you checked this exact mapping. Rejecting records that it is wrong and leaves
-          the ward blocked — correcting it is a reference-data change, not something this screen can do.
-        </p>
+      <PageHead
+        title="Inferred constituency edges"
+        lead="These wards were matched to a State Constituency by inference rather than read from an authoritative source. Until a reviewer confirms one, members on that ward cannot be given constituency ancestry and are not counted at State Constituency, Federal Constituency or Senatorial District level."
+      />
 
-        {summary ? (
-          <dl className="stat-row">
-            <div>
-              <dt>Awaiting review</dt>
-              <dd>{summary.pending}</dd>
-            </div>
-            <div>
-              <dt>Approved</dt>
-              <dd>{summary.approved}</dd>
-            </div>
-            <div>
-              <dt>Rejected</dt>
-              <dd>{summary.rejected}</dd>
-            </div>
-            <div>
-              <dt>Inferred edges</dt>
-              <dd>{summary.total}</dd>
-            </div>
-          </dl>
-        ) : null}
-
+      <div className="stack-4">
         {error ? <FeedbackBanner tone="error" message={error} /> : null}
         {message ? <FeedbackBanner tone="success" message={message} /> : null}
 
-        <nav className="tab-row">
-          {FILTERS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={filter === item.key ? "button" : "button secondary"}
-              onClick={() => setFilter(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </section>
+        <Notice tone="legacy" title="What each decision records">
+          <span>
+            Approving records that you checked this exact mapping. Rejecting records that it is wrong and leaves the
+            ward blocked — correcting it is a reference-data change, not something this screen can do.
+          </span>
+        </Notice>
 
-      <section className="panel">
-        {loading ? <p className="muted">Loading…</p> : null}
-        {!loading && edges.length === 0 ? <p className="muted">No edges in this state.</p> : null}
-
-        <ul className="record-list">
-          {edges.map((edge) => (
-            <li key={edge.wardId} className="record-list__item">
-              <div>
-                <strong>{edge.wardName}</strong>
-                <p className="muted">
-                  {edge.lga?.name ?? "Unknown LGA"} → {edge.stateConstituency?.name ?? "No constituency"}
-                  {edge.stateConstituency?.federalConstituency
-                    ? ` → ${edge.stateConstituency.federalConstituency.name}`
-                    : ""}
-                  {edge.stateConstituency?.federalConstituency?.senatorialDistrict
-                    ? ` → ${edge.stateConstituency.federalConstituency.senatorialDistrict.name}`
-                    : ""}
-                </p>
-                <p className="muted">Basis: {edge.inferenceBasis ?? "not recorded"}</p>
-                <p className="muted">
-                  {edge.impact.members} member(s), {edge.impact.coordinators} coordinator(s) affected ·{" "}
-                  {edge.operational ? "operational" : "blocked"} · {edge.reviewState.toLowerCase()}
-                </p>
-                {edge.decision ? (
-                  <p className="muted">
-                    {edge.decision.outcome === "APPROVED" ? "Approved" : "Rejected"} by{" "}
-                    {edge.decision.reviewer?.name ?? "unknown"} — “{edge.decision.reason}”
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => {
-                  setSelected(edge);
-                  setReason("");
-                }}
-              >
-                Review
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {selected ? (
-        <section className="panel">
-          <h2>{selected.wardName}</h2>
-          <p className="muted">
-            Deciding: <strong>{selected.wardName}</strong> belongs to{" "}
-            <strong>{selected.stateConstituency?.name ?? "no constituency"}</strong>.
-          </p>
-
-          <h3>Source evidence</h3>
-          <ul>
-            <li>
-              INEC delimitation:{" "}
-              {selected.sourceEvidence.inecDelimitation
-                ? `${selected.sourceEvidence.inecDelimitation.name} (${selected.sourceEvidence.inecDelimitation.code})`
-                : "no record"}
-            </li>
-            <li>
-              Constituency workbook spelling:{" "}
-              {selected.sourceEvidence.constituencyWorkbook
-                ? selected.sourceEvidence.constituencyWorkbook.aliases.join(", ")
-                : "no differing spelling recorded"}
-            </li>
-            <li>
-              Constituency source code:{" "}
-              {selected.sourceEvidence.constituencySourceCode
-                ? `${selected.sourceEvidence.constituencySourceCode.code}`
-                : "no record"}
-            </li>
-          </ul>
-          <p className="muted">{selected.sourceEvidence.note}</p>
-          <p className="muted">Inference basis: {selected.inferenceBasis ?? "not recorded"}</p>
-          <p className="muted">
-            Impact today: {selected.impact.members} member(s), {selected.impact.coordinators} coordinator(s).
-            Coordinators are shown for context only; this decision does not change them.
-          </p>
-
-          <label className="starter-form__field">
-            <span>Reason (recorded permanently, minimum 10 characters)</span>
-            <textarea
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              rows={3}
-              placeholder="What did you check, and what did you conclude?"
+        {summary ? (
+          <KpiRow>
+            <Kpi
+              label="Awaiting review"
+              value={formatCount(summary.pending)}
+              note="Wards blocked from constituency ancestry"
+              tone={summary.pending > 0 ? "accent" : undefined}
             />
-          </label>
+            <Kpi label="Approved" value={formatCount(summary.approved)} note="Confirmed against a source" />
+            <Kpi label="Rejected" value={formatCount(summary.rejected)} note="Still blocked" />
+            <Kpi label="Inferred edges" value={formatCount(summary.total)} />
+          </KpiRow>
+        ) : null}
 
-          <div className="button-row">
-            <button
-              type="button"
-              className="button"
-              disabled={reasonTooShort}
-              onClick={() => setPending("approve")}
+        <Panel title="Edges" meta={`${formatCount(edges.length)} in this state`} flush>
+          <Toolbar>
+            <span className="cluster">
+              {FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={filter === item.key ? "btn btn-sm btn-primary" : "btn btn-sm"}
+                  aria-pressed={filter === item.key}
+                  onClick={() => setFilter(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </span>
+          </Toolbar>
+
+          {loading ? (
+            <div className="panel-body">
+              <StateView kind="loading" title="Loading edges…" />
+            </div>
+          ) : (
+            <DataTable
+              head={
+                <tr>
+                  <th>Ward</th>
+                  <th>Inferred chain</th>
+                  <th>Basis</th>
+                  <th className="numeric">Impact</th>
+                  <th>State</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
             >
-              Approve this edge
-            </button>
-            <button
-              type="button"
-              className="button danger"
-              disabled={reasonTooShort}
-              onClick={() => setPending("reject")}
-            >
-              Reject this edge
-            </button>
-            <button type="button" className="button secondary" onClick={() => setSelected(null)}>
-              Cancel
-            </button>
-          </div>
-          {reasonTooShort ? <p className="muted">A reason is required before either decision.</p> : null}
-        </section>
-      ) : null}
+              {edges.length === 0 ? (
+                <EmptyRow colSpan={6}>No edges in this state.</EmptyRow>
+              ) : (
+                edges.map((edge) => (
+                  <tr key={edge.wardId}>
+                    <td>
+                      <strong>{edge.wardName}</strong>
+                      <div className="muted-text">{edge.lga?.name ?? "Unknown LGA"}</div>
+                    </td>
+                    <td className="muted-text">
+                      {edge.stateConstituency?.name ?? "No constituency"}
+                      {edge.stateConstituency?.federalConstituency
+                        ? ` → ${edge.stateConstituency.federalConstituency.name}`
+                        : ""}
+                      {edge.stateConstituency?.federalConstituency?.senatorialDistrict
+                        ? ` → ${edge.stateConstituency.federalConstituency.senatorialDistrict.name}`
+                        : ""}
+                    </td>
+                    <td className="muted-text">{edge.inferenceBasis ?? "not recorded"}</td>
+                    <td className="numeric">
+                      {formatCount(edge.impact.members)} members
+                      <div className="muted-text">{formatCount(edge.impact.coordinators)} coordinators</div>
+                    </td>
+                    <td>
+                      <span className={edge.operational ? "pill pill-executed" : "pill pill-refused"}>
+                        {edge.operational ? "operational" : "blocked"}
+                      </span>
+                      <div className="muted-text">{edge.reviewState.toLowerCase()}</div>
+                      {edge.decision ? (
+                        <div className="muted-text" title={edge.decision.reason}>
+                          {edge.decision.outcome === "APPROVED" ? "Approved" : "Rejected"} by{" "}
+                          {edge.decision.reviewer?.name ?? "unknown"}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="actions">
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        onClick={() => {
+                          setSelected(edge);
+                          setReason("");
+                        }}
+                      >
+                        Review
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          )}
+        </Panel>
+
+        {selected ? (
+          <Panel
+            title={selected.wardName}
+            meta={`Deciding whether it belongs to ${selected.stateConstituency?.name ?? "no constituency"}`}
+          >
+            <div className="stack-3">
+              <DetailList
+                rows={[
+                  {
+                    label: "INEC delimitation",
+                    value: selected.sourceEvidence.inecDelimitation
+                      ? `${selected.sourceEvidence.inecDelimitation.name} (${selected.sourceEvidence.inecDelimitation.code})`
+                      : "no record",
+                  },
+                  {
+                    label: "Workbook spelling",
+                    value: selected.sourceEvidence.constituencyWorkbook
+                      ? selected.sourceEvidence.constituencyWorkbook.aliases.join(", ")
+                      : "no differing spelling recorded",
+                  },
+                  {
+                    label: "Constituency source code",
+                    value: selected.sourceEvidence.constituencySourceCode
+                      ? selected.sourceEvidence.constituencySourceCode.code
+                      : "no record",
+                  },
+                  { label: "Inference basis", value: selected.inferenceBasis ?? "not recorded" },
+                  {
+                    label: "Impact today",
+                    value: `${formatCount(selected.impact.members)} members, ${formatCount(selected.impact.coordinators)} coordinators. Coordinators are shown for context only; this decision does not change them.`,
+                  },
+                  { label: "Note", value: selected.sourceEvidence.note },
+                ]}
+              />
+
+              <Field
+                label="Reason"
+                hint="Recorded permanently, minimum 10 characters."
+                error={reasonTooShort ? "A reason is required before either decision." : undefined}
+              >
+                <textarea
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  rows={3}
+                  placeholder="What did you check, and what did you conclude?"
+                />
+              </Field>
+
+              <div className="btn-row">
+                <button className="btn btn-primary" type="button" disabled={reasonTooShort} onClick={() => setPending("approve")}>
+                  Approve this edge
+                </button>
+                <button className="btn btn-danger" type="button" disabled={reasonTooShort} onClick={() => setPending("reject")}>
+                  Reject this edge
+                </button>
+                <button className="btn" type="button" onClick={() => setSelected(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Panel>
+        ) : null}
+      </div>
 
       <ConfirmDialog
         open={pending !== null}

@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile } from "@pics-nigeria/shared";
 import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, logoutCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { Field, Notice, PageHead, Panel, PanelGrid, StateView } from "../../../components/ui";
 import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminAccountPage() {
@@ -152,93 +153,143 @@ export default function AdminAccountPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading account settings...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Account" />
+        <StateView kind="loading" title="Loading account settings…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load account</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Account" />
+        <StateView
+          kind="error"
+          title="Unable to load your account"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Admin account</p>
-        <h1>{user.name}</h1>
-        <p>Update your profile, password, and sensitive export tools from one place.</p>
-        <div className="action-row" style={{ marginTop: 12 }}>
-          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+    <main className="console-shell">
+      <PageHead
+        title={user.name}
+        lead="Your profile, password and export tools."
+        actions={
+          <button className="btn" type="button" onClick={() => void handleLogout()}>
             Sign out
           </button>
-        </div>
-      </section>
+        }
+      />
 
       <AdminNav role={user?.role} />
 
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
+        {message ? <Notice tone="ok" title={message} /> : null}
 
-      <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Change account info</h2>
-          <form className="form" onSubmit={handleProfileSubmit}>
-            <label className="field">
-              <span>Name</span>
-              <input value={profileForm.name} onChange={(event) => setProfileForm({ ...profileForm, name: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Email</span>
-              <input type="email" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Phone</span>
-              <input value={profileForm.phone} onChange={(event) => setProfileForm({ ...profileForm, phone: event.target.value })} />
-            </label>
-            <button className="button" type="submit">Save account</button>
-          </form>
-        </section>
+        <PanelGrid>
+          <Panel title="Account details">
+            <form className="stack-3" onSubmit={handleProfileSubmit}>
+              <Field label="Name">
+                <input
+                  value={profileForm.name}
+                  onChange={(event) => setProfileForm({ ...profileForm, name: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="Email">
+                <input
+                  type="email"
+                  value={profileForm.email}
+                  onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="Phone">
+                <input
+                  value={profileForm.phone}
+                  onChange={(event) => setProfileForm({ ...profileForm, phone: event.target.value })}
+                />
+              </Field>
+              <div className="btn-row">
+                <button className="btn btn-primary" type="submit">
+                  Save account
+                </button>
+              </div>
+            </form>
+          </Panel>
 
-        <section className="panel card">
-          <h2>Change password</h2>
-          <form className="form" onSubmit={handlePasswordSubmit}>
-            <label className="field">
-              <span>Current password</span>
-              <input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>New password</span>
-              <input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} minLength={8} required />
-            </label>
-            <label className="field">
-              <span>Confirm new password</span>
-              <input type="password" value={passwordForm.confirmNewPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmNewPassword: event.target.value })} minLength={8} required />
-            </label>
-            <button className="button" type="submit">Update password</button>
-          </form>
-        </section>
-      </section>
+          <Panel title="Change password">
+            <form className="stack-3" onSubmit={handlePasswordSubmit}>
+              <Field label="Current password">
+                <input
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="New password" hint="At least 8 characters.">
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
+                  minLength={8}
+                  required
+                />
+              </Field>
+              <Field
+                label="Confirm new password"
+                error={
+                  passwordForm.confirmNewPassword && passwordForm.newPassword !== passwordForm.confirmNewPassword
+                    ? "The two passwords do not match."
+                    : undefined
+                }
+              >
+                <input
+                  type="password"
+                  value={passwordForm.confirmNewPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, confirmNewPassword: event.target.value })}
+                  minLength={8}
+                  required
+                />
+              </Field>
+              <div className="btn-row">
+                <button className="btn btn-primary" type="submit">
+                  Update password
+                </button>
+              </div>
+            </form>
+          </Panel>
+        </PanelGrid>
 
-      {user.role === "SUPER_ADMIN" ? (
-        <section className="panel card" style={{ marginTop: 24 }}>
-          <h2>Protected export</h2>
-          <p className="muted">Export consented voter phone numbers and emails only when operationally necessary.</p>
-          <button className="button" type="button" onClick={() => void handleExportContacts()} disabled={exporting}>
-            {exporting ? "Exporting..." : "Export consented voter contacts"}
-          </button>
-        </section>
-      ) : null}
+        {user.role === "SUPER_ADMIN" ? (
+          <Panel title="Protected export">
+            <div className="stack-3">
+              <Notice tone="legacy" title="Personal contact data">
+                <span>
+                  This exports consented voter phone numbers and email addresses. Use it only when operationally
+                  necessary — contact details are otherwise restricted.
+                </span>
+              </Notice>
+              <div className="btn-row">
+                <button className="btn" type="button" onClick={() => void handleExportContacts()} disabled={exporting}>
+                  {exporting ? "Exporting…" : "Export consented voter contacts"}
+                </button>
+              </div>
+            </div>
+          </Panel>
+        ) : null}
+      </div>
     </main>
   );
 }

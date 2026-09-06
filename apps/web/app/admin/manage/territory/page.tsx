@@ -7,6 +7,7 @@ import type { AuthUserProfile, LgaItem, StateItem, WardItem } from "@pics-nigeri
 import { ApiError, fetchCurrentUser, fetchLgas, fetchStates, fetchWards } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory, getManagedRoleLabel, MANAGED_ROLE_OPTIONS } from "../../../../components/admin-management-utils";
+import { Field, PageHead, Panel, StateView } from "../../../../components/ui";
 import { clearSession, readSession } from "../../../../lib/session";
 
 type LocatorAction = "manage-users" | "create-user" | "track-agents";
@@ -98,117 +99,153 @@ export default function AdminManageTerritoryPage() {
         : "/admin/manage/users";
     return query ? `${basePath}?${query}` : basePath;
   }, [action, selectedLgaId, selectedRole, selectedStateId, selectedWardId]);
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading territory selector...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Select territory" />
+        <StateView kind="loading" title="Loading territory selector…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load territory selector</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Select territory" />
+        <StateView
+          kind="error"
+          title="Unable to load the territory selector"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
+  const blocked = action !== "track-agents" && !selectedRole;
+
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Territory-first workflow</p>
-        <h1>Select territory</h1>
-        <p>Current authority: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
-      </section>
+    <main className="console-shell form-page">
+      <PageHead
+        title="Select territory"
+        lead={`Current authority: ${describeTerritory(user.adminProfile || emptyTerritorySummary())}`}
+        actions={
+          <Link className="btn" href="/admin/manage">
+            Back to management
+          </Link>
+        }
+      />
 
       <AdminNav role={user?.role} />
 
-      <section className="panel card">
-        <h2>Choose scope</h2>
-        <p className="muted">Use the same locator flow for user management, creation, and live agent tracking.</p>
-        <div className="form">
-          <label className="field">
-            <span>Action</span>
-            <select value={action} onChange={(event) => setAction(event.target.value as LocatorAction)}>
-              <option value="manage-users">Manage Users</option>
-              <option value="create-user">Create User</option>
-              <option value="track-agents">Track Agents</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Role</span>
-            <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value as "" | "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER")}>
-              <option value="">{action === "track-agents" ? "Agent operations" : "Select role"}</option>
-              {MANAGED_ROLE_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>{item.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>State</span>
-            <select value={selectedStateId} onChange={(event) => setSelectedStateId(event.target.value)}>
-              <option value="">All allowed states</option>
-              {states
-                .filter((item) => !user.adminProfile?.stateId || item.id === user.adminProfile.stateId)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>LGA</span>
-            <select value={selectedLgaId} onChange={(event) => setSelectedLgaId(event.target.value)} disabled={!selectedStateId}>
-              <option value="">All allowed LGAs</option>
-              {lgas
-                .filter((item) => !user.adminProfile?.lgaId || item.id === user.adminProfile.lgaId)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Ward</span>
-            <select value={selectedWardId} onChange={(event) => setSelectedWardId(event.target.value)} disabled={!selectedLgaId}>
-              <option value="">All allowed wards</option>
-              {wards
-                .filter((item) => !user.adminProfile?.wardId || item.id === user.adminProfile.wardId)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-            </select>
-          </label>
-        </div>
-        <p className="muted" style={{ marginTop: 16 }}>
-          {action === "track-agents"
-            ? "Open scoped live tracking for agents inside the selected territory."
-            : selectedRole
-              ? `Continue with ${getManagedRoleLabel(selectedRole)} records in the selected territory.`
-              : "Select a role before opening user management or create user."}
-        </p>
-        <div className="action-row" style={{ marginTop: 16 }}>
-          <Link
-            className="button"
-            href={nextHref}
-            aria-disabled={action !== "track-agents" && !selectedRole}
-            onClick={(event) => {
-              if (action !== "track-agents" && !selectedRole) {
-                event.preventDefault();
-              }
-            }}
-          >
-            {action === "manage-users" ? "Open scoped users" : action === "create-user" ? "Open create workflow" : "Open live tracking"}
-          </Link>
-          <Link className="button secondary" href="/admin/manage">Back to management</Link>
-        </div>
-      </section>
+      <div className="stack-4">
+        <Panel title="Choose scope" meta="The same locator serves users, creation and tracking">
+          <div className="stack-3">
+            <div className="form-grid">
+              <Field label="Action">
+                <select value={action} onChange={(event) => setAction(event.target.value as LocatorAction)}>
+                  <option value="manage-users">Manage users</option>
+                  <option value="create-user">Create user</option>
+                  <option value="track-agents">Track agents</option>
+                </select>
+              </Field>
+              <Field
+                label="Role"
+                hint={blocked ? "Required before opening user management or creation." : undefined}
+              >
+                <select
+                  value={selectedRole}
+                  onChange={(event) =>
+                    setSelectedRole(event.target.value as "" | "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER")
+                  }
+                >
+                  <option value="">{action === "track-agents" ? "Agent operations" : "Select role"}</option>
+                  {MANAGED_ROLE_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="State">
+                <select value={selectedStateId} onChange={(event) => setSelectedStateId(event.target.value)}>
+                  <option value="">All allowed states</option>
+                  {states
+                    .filter((item) => !user.adminProfile?.stateId || item.id === user.adminProfile.stateId)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field label="LGA">
+                <select
+                  value={selectedLgaId}
+                  onChange={(event) => setSelectedLgaId(event.target.value)}
+                  disabled={!selectedStateId}
+                >
+                  <option value="">All allowed LGAs</option>
+                  {lgas
+                    .filter((item) => !user.adminProfile?.lgaId || item.id === user.adminProfile.lgaId)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field label="Ward">
+                <select
+                  value={selectedWardId}
+                  onChange={(event) => setSelectedWardId(event.target.value)}
+                  disabled={!selectedLgaId}
+                >
+                  <option value="">All allowed wards</option>
+                  {wards
+                    .filter((item) => !user.adminProfile?.wardId || item.id === user.adminProfile.wardId)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+            </div>
+
+            <p className="muted-text">
+              {action === "track-agents"
+                ? "Opens scoped live tracking for agents inside the selected territory."
+                : selectedRole
+                  ? `Continues with ${getManagedRoleLabel(selectedRole)} records in the selected territory.`
+                  : "Select a role before opening user management or create user."}
+            </p>
+
+            <div className="btn-row">
+              <Link
+                className="btn btn-primary"
+                href={nextHref}
+                aria-disabled={blocked}
+                onClick={(event) => {
+                  if (blocked) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                {action === "manage-users"
+                  ? "Open scoped users"
+                  : action === "create-user"
+                    ? "Open create workflow"
+                    : "Open live tracking"}
+              </Link>
+            </div>
+          </div>
+        </Panel>
+      </div>
     </main>
   );
 }

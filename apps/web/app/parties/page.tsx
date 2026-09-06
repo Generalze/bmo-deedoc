@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { PoliticalPartyItem } from "@pics-nigeria/shared";
 import { ApiError, fetchPublicParties } from "../../lib/api";
+import { Notice, PageHead, Panel, StateView, Toolbar, ToolbarEnd, ToolbarField, formatCount } from "../../components/ui";
 
 export default function PartiesPage() {
   const [parties, setParties] = useState<PoliticalPartyItem[]>([]);
@@ -37,52 +38,77 @@ export default function PartiesPage() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero candidate-discovery-hero">
-        <h1>Political Parties</h1>
-        <p>Browse INEC-listed parties, open their portfolios, and explore published candidates under each party.</p>
-        <div className="candidate-filter-row" style={{ gridTemplateColumns: "2fr auto" }}>
-          <label className="field">
-            <span>Search by party name or code</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search political parties" />
-          </label>
-          <button className="button" type="button" onClick={() => void handleSearch()} disabled={loading}>
-            {loading ? "Loading..." : "Apply"}
-          </button>
-        </div>
-        <p className="muted">
-          Looking for candidates instead? <Link href="/candidates">Open candidate discovery</Link>.
-        </p>
-        {error ? <p className="error">{error}</p> : null}
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Political parties"
+        lead="Browse INEC-listed parties, open their portfolios, and explore published candidates under each party."
+        actions={
+          <Link className="btn" href="/candidates">
+            Candidate discovery
+          </Link>
+        }
+      />
 
-      {loading ? (
-        <section className="panel card">
-          <p>Loading political parties...</p>
-        </section>
-      ) : parties.length === 0 ? (
-        <section className="panel card empty-state">
-          <h2>No parties found</h2>
-          <p className="muted">Try a wider search or check again after the reference data refresh.</p>
-        </section>
-      ) : (
-        <section className="candidate-grid">
-          {parties.map((party) => (
-            <article key={party.id} className="panel card candidate-card">
-              <div className="candidate-card-media fallback">{party.code}</div>
-              <div className="candidate-card-body">
-                <p className="eyebrow">{party.code}</p>
-                <h2>{party.name}</h2>
-                <p>{party.description || `${party.name} is available in the public party directory for candidate discovery.`}</p>
-                <p className="muted">
-                  {party.isApprovedByInec ? "INEC listed" : "Custom party record"} | {party.candidateCount || 0} published candidates
-                </p>
-                <Link href={`/parties/${party.id}`}>Open party profile</Link>
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Could not load parties">{error}</Notice> : null}
+
+        <Panel title="Directory" meta={`${formatCount(parties.length)} parties`} flush>
+          <Toolbar>
+            <ToolbarField label="Search by party name or code" hideLabel>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by party name or code"
+              />
+            </ToolbarField>
+            <ToolbarEnd>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleSearch()} disabled={loading}>
+                {loading ? "Loading…" : "Apply"}
+              </button>
+            </ToolbarEnd>
+          </Toolbar>
+
+          <div className="panel-body">
+            {loading ? (
+              <StateView kind="loading" title="Loading political parties…" />
+            ) : parties.length === 0 ? (
+              <StateView
+                kind="empty"
+                title="No parties found"
+                detail="Try a wider search, or check again after the reference data refresh."
+              />
+            ) : (
+              /* A directory you browse and choose from, with a party mark on
+                 each entry. Cards are the right shape; a table is not. */
+              <div className="candidate-grid">
+                {parties.map((party) => (
+                  <article key={party.id} className="candidate-card">
+                    <div className="candidate-card-media fallback">{party.code}</div>
+                    <div className="candidate-card-body">
+                      <p className="kpi-label">{party.code}</p>
+                      <h2>{party.name}</h2>
+                      <p>
+                        {party.description ||
+                          `${party.name} is available in the public party directory for candidate discovery.`}
+                      </p>
+                      <p className="cluster">
+                        <span className={party.isApprovedByInec ? "pill pill-executed" : "pill pill-stale"}>
+                          {party.isApprovedByInec ? "INEC listed" : "custom record"}
+                        </span>
+                        <span className="muted-text">{formatCount(party.candidateCount || 0)} published candidates</span>
+                      </p>
+                      <Link className="btn btn-sm" href={`/parties/${party.id}`}>
+                        Open party profile
+                      </Link>
+                    </div>
+                  </article>
+                ))}
               </div>
-            </article>
-          ))}
-        </section>
-      )}
+            )}
+          </div>
+        </Panel>
+      </div>
     </main>
   );
 }

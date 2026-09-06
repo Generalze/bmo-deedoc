@@ -28,6 +28,17 @@ import { AdminNav } from "../../../components/admin-nav";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  Notice,
+  PageHead,
+  Panel,
+  StateView,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const adminLevels: AdminLevel[] = ["NATIONAL", "GEO_POLITICAL_ZONE", "STATE", "SENATORIAL", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "LGA", "WARD"];
@@ -255,252 +266,323 @@ export default function AdminCommunicationsPage() {
     event.preventDefault();
     setConfirmOpen(true);
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading communications...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Communications" />
+        <StateView kind="loading" title="Loading communications…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load communications</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Communications" />
+        <StateView
+          kind="error"
+          title="Unable to load communications"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
     <>
-      <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Communications</p>
-        <h1>Targeted messaging</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-      </section>
+      <main className="console-shell">
+        <PageHead
+          title="Targeted messaging"
+          lead={`Visible scope: ${describeTerritory(
+            user.adminProfile || {
+              geoPoliticalZoneId: null,
+              stateId: null,
+              senatorialDistrictId: null,
+              federalConstituencyId: null,
+              lgaId: null,
+              wardId: null,
+              stateConstituencyId: null,
+              pollingUnitId: null,
+            },
+          )}`}
+        />
 
-      <AdminNav role={user?.role} />
-      <FeedbackBanner tone="error" message={error} />
-      <FeedbackBanner tone="success" message={message} />
+        <AdminNav role={user?.role} />
 
-      <section className="grid" style={{ gridTemplateColumns: "minmax(320px, 2fr) minmax(280px, 1fr)", gap: 24 }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Create communication</h2>
-              <p className="muted">Choose role, territory, party, and workflow filters before sending.</p>
-            </div>
-          </div>
-          <form className="form" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>Title</span>
-              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} minLength={3} required />
-            </label>
-            <label className="field">
-              <span>Message</span>
-              <textarea rows={5} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} minLength={5} required />
-            </label>
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-              <label className="field">
-                <span>Audience</span>
-                <select value={form.audience} onChange={(event) => {
-                  setMessage("");
-                  updateAudience(event.target.value as typeof form.audience);
-                }}>
-                  <option value="AGENTS">Agents</option>
-                  <option value="ADMINS">Admins</option>
-                  <option value="VOTERS">Voters</option>
-                  <option value="CANDIDATES">Candidates</option>
-                  <option value="ALL">All visible roles</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Political party</span>
-                <select
-                  value={form.politicalPartyId}
-                  onChange={(event) => {
-                    setMessage("");
-                    setForm({ ...form, politicalPartyId: event.target.value });
-                  }}
-                  disabled={form.audience === "VOTERS"}
-                >
-                  <option value="">All visible parties</option>
-                  {parties.map((party) => (
-                    <option key={party.id} value={party.id}>{party.name}</option>
-                  ))}
-                </select>
-                {form.audience === "VOTERS" ? (
-                  <small className="muted">Party targeting is available only for party-linked recipient roles.</small>
+        <div className="stack-4">
+          <FeedbackBanner tone="error" message={error} />
+          <FeedbackBanner tone="success" message={message} />
+
+          <div className="workbench">
+            <Panel title="Create communication" meta="Role, territory, party and workflow filters">
+              <form className="stack-3" onSubmit={handleSubmit}>
+                <Field label="Title">
+                  <input
+                    value={form.title}
+                    onChange={(event) => setForm({ ...form, title: event.target.value })}
+                    minLength={3}
+                    required
+                  />
+                </Field>
+                <Field label="Message">
+                  <textarea
+                    rows={5}
+                    value={form.message}
+                    onChange={(event) => setForm({ ...form, message: event.target.value })}
+                    minLength={5}
+                    required
+                  />
+                </Field>
+
+                <div className="form-grid">
+                  <Field label="Audience">
+                    <select
+                      value={form.audience}
+                      onChange={(event) => {
+                        setMessage("");
+                        updateAudience(event.target.value as typeof form.audience);
+                      }}
+                    >
+                      <option value="AGENTS">Agents</option>
+                      <option value="ADMINS">Admins</option>
+                      <option value="VOTERS">Voters</option>
+                      <option value="CANDIDATES">Candidates</option>
+                      <option value="ALL">All visible roles</option>
+                    </select>
+                  </Field>
+
+                  <Field
+                    label="Political party"
+                    hint={
+                      form.audience === "VOTERS"
+                        ? "Party targeting is available only for party-linked recipient roles."
+                        : undefined
+                    }
+                  >
+                    <select
+                      value={form.politicalPartyId}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, politicalPartyId: event.target.value });
+                      }}
+                      disabled={form.audience === "VOTERS"}
+                    >
+                      <option value="">All visible parties</option>
+                      {parties.map((party) => (
+                        <option key={party.id} value={party.id}>
+                          {party.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="State">
+                    <select
+                      value={form.stateId}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, stateId: event.target.value, lgaId: "", wardId: "" });
+                      }}
+                    >
+                      <option value="">All allowed states</option>
+                      {states
+                        .filter((item) => !user.adminProfile?.stateId || item.id === user.adminProfile.stateId)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+
+                  <Field label="LGA">
+                    <select
+                      value={form.lgaId}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, lgaId: event.target.value, wardId: "" });
+                      }}
+                      disabled={!form.stateId}
+                    >
+                      <option value="">All allowed LGAs</option>
+                      {lgas
+                        .filter((item) => !user.adminProfile?.lgaId || item.id === user.adminProfile.lgaId)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Ward">
+                    <select
+                      value={form.wardId}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, wardId: event.target.value });
+                      }}
+                      disabled={!form.lgaId}
+                    >
+                      <option value="">All allowed wards</option>
+                      {wards
+                        .filter((item) => !user.adminProfile?.wardId || item.id === user.adminProfile.wardId)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Agent task status">
+                    <select
+                      value={form.taskStatus}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, taskStatus: event.target.value });
+                      }}
+                      disabled={!["AGENTS", "ALL"].includes(form.audience)}
+                    >
+                      <option value="">All task states</option>
+                      <option value="TODO">Todo</option>
+                      <option value="IN_PROGRESS">In progress</option>
+                      <option value="BLOCKED">Blocked</option>
+                      <option value="DONE">Done</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Admin level">
+                    <select
+                      value={form.adminLevel}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, adminLevel: event.target.value });
+                      }}
+                      disabled={!["ADMINS", "ALL"].includes(form.audience)}
+                    >
+                      <option value="">All admin levels</option>
+                      {adminLevels.map((level) => (
+                        <option key={level} value={level}>
+                          {level.replace(/_/g, " ").toLowerCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Candidate office">
+                    <select
+                      value={form.officeType}
+                      onChange={(event) => {
+                        setMessage("");
+                        setForm({ ...form, officeType: event.target.value });
+                      }}
+                      disabled={!["CANDIDATES", "ALL"].includes(form.audience)}
+                    >
+                      <option value="">All candidate offices</option>
+                      {officeTypes.map((office) => (
+                        <option key={office} value={office}>
+                          {office.replace(/_/g, " ").toLowerCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <div className="btn-row">
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => void handlePreview()}
+                    disabled={previewLoading || submitting}
+                  >
+                    {previewLoading ? "Previewing…" : "Preview audience"}
+                  </button>
+                  <button className="btn btn-primary" type="submit" disabled={!canSend}>
+                    {submitting ? "Sending…" : "Send communication"}
+                  </button>
+                </div>
+                {!canSend ? (
+                  <p className="muted-text">
+                    Preview the current audience and confirm at least one visible recipient before sending.
+                  </p>
                 ) : null}
-              </label>
-              <label className="field">
-                <span>State</span>
-                <select value={form.stateId} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, stateId: event.target.value, lgaId: "", wardId: "" });
-                }}>
-                  <option value="">All allowed states</option>
-                  {states.filter((item) => !user.adminProfile?.stateId || item.id === user.adminProfile.stateId).map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>LGA</span>
-                <select value={form.lgaId} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, lgaId: event.target.value, wardId: "" });
-                }} disabled={!form.stateId}>
-                  <option value="">All allowed LGAs</option>
-                  {lgas.filter((item) => !user.adminProfile?.lgaId || item.id === user.adminProfile.lgaId).map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Ward</span>
-                <select value={form.wardId} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, wardId: event.target.value });
-                }} disabled={!form.lgaId}>
-                  <option value="">All allowed wards</option>
-                  {wards.filter((item) => !user.adminProfile?.wardId || item.id === user.adminProfile.wardId).map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Agent task status</span>
-                <select value={form.taskStatus} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, taskStatus: event.target.value });
-                }} disabled={!["AGENTS", "ALL"].includes(form.audience)}>
-                  <option value="">All task states</option>
-                  <option value="TODO">Todo</option>
-                  <option value="IN_PROGRESS">In progress</option>
-                  <option value="BLOCKED">Blocked</option>
-                  <option value="DONE">Done</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Admin level</span>
-                <select value={form.adminLevel} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, adminLevel: event.target.value });
-                }} disabled={!["ADMINS", "ALL"].includes(form.audience)}>
-                  <option value="">All admin levels</option>
-                  {adminLevels.map((level) => (
-                    <option key={level} value={level}>{level}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Candidate office</span>
-                <select value={form.officeType} onChange={(event) => {
-                  setMessage("");
-                  setForm({ ...form, officeType: event.target.value });
-                }} disabled={!["CANDIDATES", "ALL"].includes(form.audience)}>
-                  <option value="">All candidate offices</option>
-                  {officeTypes.map((office) => (
-                    <option key={office} value={office}>{office}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="action-row">
-              <button className="button secondary" type="button" onClick={() => void handlePreview()} disabled={previewLoading || submitting}>
-                {previewLoading ? "Previewing..." : "Preview Audience"}
-              </button>
-              <button className="button" type="submit" disabled={!canSend}>
-                {submitting ? "Sending..." : "Send Communication"}
-              </button>
-            </div>
-            {!canSend ? (
-              <p className="muted">
-                Preview the current audience and confirm at least one visible recipient before sending.
-              </p>
-            ) : null}
-          </form>
-        </section>
+              </form>
+            </Panel>
 
-        <section className="panel card">
-          <h2>Target summary</h2>
-          {!preview ? (
-            <p className="muted">Preview the audience before sending to see the exact scoped recipient breakdown.</p>
-          ) : (
-            <div className="reward-list">
-              <article className="reward-item">
-                <strong>{preview.recipientCount} recipients</strong>
-                <p>Audience: {preview.filters.audience}</p>
-                <p>Territory: {describeTerritory(preview.territory)}</p>
-              </article>
-              <article className="reward-item">
-                <strong>Role breakdown</strong>
-                <p>Admins: {preview.breakdown.admins}</p>
-                <p>Agents: {preview.breakdown.agents}</p>
-                <p>Voters: {preview.breakdown.voters}</p>
-                <p>Candidates: {preview.breakdown.candidates}</p>
-              </article>
-              <article className="reward-item">
-                <strong>Applied filters</strong>
-                <p>Party: {readPartyLabel(parties, preview.filters.politicalPartyId)}</p>
-                <p>Task status: {preview.filters.taskStatus || "All task states"}</p>
-                <p>Admin level: {preview.filters.adminLevel || "All admin levels"}</p>
-                <p>Candidate office: {preview.filters.officeType || "All candidate offices"}</p>
-              </article>
-            </div>
-          )}
-          {previewIsStale ? (
-            <p className="muted" style={{ marginTop: 16 }}>
-              Audience filters changed after the last preview. Preview again before sending.
-            </p>
-          ) : null}
-        </section>
-      </section>
-
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Recent communications</h2>
-            <p className="muted">Messages already sent through the existing admin broadcast channel.</p>
+            <Panel
+              title="Target summary"
+              meta={preview ? `${formatCount(preview.recipientCount)} recipients` : "Not previewed"}
+            >
+              {!preview ? (
+                <StateView
+                  kind="empty"
+                  title="No audience previewed"
+                  detail="Preview the audience before sending to see the exact scoped recipient breakdown."
+                />
+              ) : (
+                <div className="stack-3">
+                  {previewIsStale ? (
+                    <Notice tone="refused" title="Preview is out of date">
+                      <span>Audience filters changed after the last preview. Preview again before sending.</span>
+                    </Notice>
+                  ) : null}
+                  <DetailList
+                    rows={[
+                      { label: "Recipients", value: <strong>{formatCount(preview.recipientCount)}</strong> },
+                      { label: "Audience", value: preview.filters.audience },
+                      { label: "Territory", value: describeTerritory(preview.territory) },
+                      { label: "Admins", value: formatCount(preview.breakdown.admins) },
+                      { label: "Agents", value: formatCount(preview.breakdown.agents) },
+                      { label: "Voters", value: formatCount(preview.breakdown.voters) },
+                      { label: "Candidates", value: formatCount(preview.breakdown.candidates) },
+                      { label: "Party", value: readPartyLabel(parties, preview.filters.politicalPartyId) },
+                      { label: "Task status", value: preview.filters.taskStatus || "All task states" },
+                      { label: "Admin level", value: preview.filters.adminLevel || "All admin levels" },
+                      { label: "Candidate office", value: preview.filters.officeType || "All candidate offices" },
+                    ]}
+                  />
+                </div>
+              )}
+            </Panel>
           </div>
-          <span className="status-pill">{broadcasts.length} visible</span>
+
+          <Panel title="Recent communications" meta={`${formatCount(broadcasts.length)} visible`} flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Message</th>
+                  <th>Audience</th>
+                  <th className="numeric">Recipients</th>
+                  <th>Sent</th>
+                </tr>
+              }
+            >
+              {broadcasts.length === 0 ? (
+                <EmptyRow colSpan={4}>No broadcasts are visible in your current scope.</EmptyRow>
+              ) : (
+                broadcasts.slice(0, 20).map((broadcast) => (
+                  <tr key={broadcast.id}>
+                    <td>
+                      <strong>{broadcast.title}</strong>
+                      <div className="muted-text">{broadcast.message}</div>
+                    </td>
+                    <td className="muted-text">{broadcast.audience.toLowerCase()}</td>
+                    <td className="numeric">{formatCount(broadcast.recipientCount)}</td>
+                    <td className="muted-text">{new Date(broadcast.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
         </div>
-
-        {broadcasts.length === 0 ? (
-          <p className="muted">No broadcasts are visible in your current scope.</p>
-        ) : (
-          <div className="reward-list">
-            {broadcasts.slice(0, 12).map((broadcast) => (
-              <article key={broadcast.id} className="reward-item">
-                <strong>{broadcast.title}</strong>
-                <p>{broadcast.message}</p>
-                <p className="muted">
-                  {broadcast.audience} | {broadcast.recipientCount} recipients | {new Date(broadcast.createdAt).toLocaleString()}
-                </p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
       </main>
+
       <ConfirmDialog
         open={confirmOpen}
         title="Confirm communication send"

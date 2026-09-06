@@ -40,6 +40,7 @@ import {
 } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import { Notice, PageHead, StateView } from "../../../../components/ui";
 import { readSession } from "../../../../lib/session";
 
 type ManagedRole = "ADMIN" | "CANDIDATE" | "AGENT";
@@ -399,22 +400,27 @@ export default function AdminManageCreatePage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading create user workflow...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Create user" />
+        <StateView kind="loading" title="Loading the user workflow…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load user workflow</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/manage">Return to management</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Create user" />
+        <StateView
+          kind="error"
+          title="Unable to load the user workflow"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/manage">
+              Return to management
+            </Link>
+          }
+        />
       </main>
     );
   }
@@ -422,27 +428,26 @@ export default function AdminManageCreatePage() {
   const currentPartyId = user.role === "ADMIN" ? user.adminProfile?.politicalPartyId || "" : "";
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Territory-first user workflow</p>
-        <h1>{mode === "create" ? "Create user" : "Edit user"}</h1>
-        <p>Authority scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title={mode === "create" ? "Create user" : "Edit user"}
+        lead={`Territory-first workflow · Authority scope: ${describeTerritory(user.adminProfile || emptyTerritorySummary())}`}
+      />
 
       <AdminNav role={user?.role} />
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
+      {message ? <Notice tone="ok" title={message} /> : null}
 
-      <section className="panel card">
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-          <label className="field">
+      <section className="panel-console panel-inset">
+        <div className="form-grid">
+          <label className="field-console">
             <span>Action</span>
             <select value={mode} onChange={(event) => setMode(event.target.value as PageMode)}>
               <option value="create">Create new user</option>
               <option value="edit">Edit existing user</option>
             </select>
           </label>
-          <label className="field">
+          <label className="field-console">
             <span>User type</span>
             <select value={role} onChange={(event) => setRole(event.target.value as ManagedRole)}>
               <option value="ADMIN">Admin</option>
@@ -451,7 +456,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
           {mode === "edit" ? (
-            <label className="field">
+            <label className="field-console">
               <span>Select user</span>
               <select value={selectedUserId} onChange={(event) => {
                 const params = new URLSearchParams({ mode: "edit", role, userId: event.target.value });
@@ -467,39 +472,39 @@ export default function AdminManageCreatePage() {
         </div>
       </section>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="form">
+      <section className="panel-console panel-inset" style={{ marginTop: 24 }}>
+        <div className="stack-3">
           {role === "ADMIN" ? (
             <>
-              <label className="field"><span>Name</span><input value={adminForm.name} onChange={(event) => setAdminForm({ ...adminForm, name: event.target.value })} /></label>
-              <label className="field"><span>Email</span><input type="email" value={adminForm.email} onChange={(event) => setAdminForm({ ...adminForm, email: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Password</span><input type="password" value={adminForm.password} onChange={(event) => setAdminForm({ ...adminForm, password: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Admin level</span><select value={adminForm.adminLevel} onChange={(event) => setAdminForm({ ...adminForm, adminLevel: event.target.value as (typeof ADMIN_LEVELS)[number] })}>{manageableAdminLevels.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
-              <label className="field"><span>Political party</span><select value={adminForm.politicalPartyId} onChange={(event) => setAdminForm({ ...adminForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
+              <label className="field-console"><span>Name</span><input value={adminForm.name} onChange={(event) => setAdminForm({ ...adminForm, name: event.target.value })} /></label>
+              <label className="field-console"><span>Email</span><input type="email" value={adminForm.email} onChange={(event) => setAdminForm({ ...adminForm, email: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Password</span><input type="password" value={adminForm.password} onChange={(event) => setAdminForm({ ...adminForm, password: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Admin level</span><select value={adminForm.adminLevel} onChange={(event) => setAdminForm({ ...adminForm, adminLevel: event.target.value as (typeof ADMIN_LEVELS)[number] })}>{manageableAdminLevels.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+              <label className="field-console"><span>Political party</span><select value={adminForm.politicalPartyId} onChange={(event) => setAdminForm({ ...adminForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
             </>
           ) : null}
 
           {role === "CANDIDATE" ? (
             <>
-              <label className="field"><span>Name</span><input value={candidateForm.name} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} /></label>
-              <label className="field"><span>Email</span><input type="email" value={candidateForm.email} onChange={(event) => setCandidateForm({ ...candidateForm, email: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Password</span><input type="password" value={candidateForm.password} onChange={(event) => setCandidateForm({ ...candidateForm, password: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Office</span><select value={candidateForm.officeType} onChange={(event) => setCandidateForm({ ...candidateForm, officeType: event.target.value as (typeof CANDIDATE_OFFICE_TYPES)[number] })}>{manageableCandidateOffices.map((office) => <option key={office} value={office}>{office}</option>)}</select></label>
-              <label className="field"><span>Political party</span><select value={candidateForm.politicalPartyId} onChange={(event) => setCandidateForm({ ...candidateForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
+              <label className="field-console"><span>Name</span><input value={candidateForm.name} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} /></label>
+              <label className="field-console"><span>Email</span><input type="email" value={candidateForm.email} onChange={(event) => setCandidateForm({ ...candidateForm, email: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Password</span><input type="password" value={candidateForm.password} onChange={(event) => setCandidateForm({ ...candidateForm, password: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Office</span><select value={candidateForm.officeType} onChange={(event) => setCandidateForm({ ...candidateForm, officeType: event.target.value as (typeof CANDIDATE_OFFICE_TYPES)[number] })}>{manageableCandidateOffices.map((office) => <option key={office} value={office}>{office}</option>)}</select></label>
+              <label className="field-console"><span>Political party</span><select value={candidateForm.politicalPartyId} onChange={(event) => setCandidateForm({ ...candidateForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
             </>
           ) : null}
 
           {role === "AGENT" ? (
             <>
-              <label className="field"><span>Name</span><input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
-              <label className="field"><span>Email</span><input type="email" value={agentForm.email} onChange={(event) => setAgentForm({ ...agentForm, email: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Password</span><input type="password" value={agentForm.password} onChange={(event) => setAgentForm({ ...agentForm, password: event.target.value })} disabled={mode === "edit"} /></label>
-              <label className="field"><span>Phone</span><input value={agentForm.phone} onChange={(event) => setAgentForm({ ...agentForm, phone: event.target.value })} /></label>
-              <label className="field"><span>Political party</span><select value={agentForm.politicalPartyId} onChange={(event) => setAgentForm({ ...agentForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
+              <label className="field-console"><span>Name</span><input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
+              <label className="field-console"><span>Email</span><input type="email" value={agentForm.email} onChange={(event) => setAgentForm({ ...agentForm, email: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Password</span><input type="password" value={agentForm.password} onChange={(event) => setAgentForm({ ...agentForm, password: event.target.value })} disabled={mode === "edit"} /></label>
+              <label className="field-console"><span>Phone</span><input value={agentForm.phone} onChange={(event) => setAgentForm({ ...agentForm, phone: event.target.value })} /></label>
+              <label className="field-console"><span>Political party</span><select value={agentForm.politicalPartyId} onChange={(event) => setAgentForm({ ...agentForm, politicalPartyId: event.target.value })} disabled={Boolean(currentPartyId)}><option value="">Select party</option>{parties.map((party) => <option key={party.id} value={party.id}>{party.code} - {party.name}</option>)}</select></label>
             </>
           ) : null}
 
-          <label className="field">
+          <label className="field-console">
             <span>State</span>
             <select value={role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId} onChange={async (event) => {
               const token = readSession();
@@ -515,7 +520,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
 
-          <label className="field">
+          <label className="field-console">
             <span>Senatorial district</span>
             <select value={role === "ADMIN" ? adminForm.senatorialDistrictId : role === "CANDIDATE" ? candidateForm.senatorialDistrictId : agentForm.senatorialDistrictId} onChange={async (event) => {
               const token = readSession();
@@ -532,7 +537,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
 
-          <label className="field">
+          <label className="field-console">
             <span>Federal constituency</span>
             <select value={role === "ADMIN" ? adminForm.federalConstituencyId : role === "CANDIDATE" ? candidateForm.federalConstituencyId : agentForm.federalConstituencyId} onChange={(event) => {
               if (role === "ADMIN") { setAdminForm({ ...adminForm, federalConstituencyId: event.target.value }); }
@@ -544,7 +549,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
 
-          <label className="field">
+          <label className="field-console">
             <span>LGA</span>
             <select value={role === "ADMIN" ? adminForm.lgaId : role === "CANDIDATE" ? candidateForm.lgaId : agentForm.lgaId} onChange={async (event) => {
               const token = readSession();
@@ -561,7 +566,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
 
-          <label className="field">
+          <label className="field-console">
             <span>State constituency</span>
             <select value={role === "ADMIN" ? adminForm.stateConstituencyId : role === "CANDIDATE" ? candidateForm.stateConstituencyId : agentForm.stateConstituencyId} onChange={(event) => {
               if (role === "ADMIN") { setAdminForm({ ...adminForm, stateConstituencyId: event.target.value }); }
@@ -573,7 +578,7 @@ export default function AdminManageCreatePage() {
             </select>
           </label>
 
-          <label className="field">
+          <label className="field-console">
             <span>Ward</span>
             <select value={role === "ADMIN" ? adminForm.wardId : role === "CANDIDATE" ? candidateForm.wardId : agentForm.wardId} onChange={async (event) => {
               const value = event.target.value;
@@ -601,7 +606,7 @@ export default function AdminManageCreatePage() {
           </label>
 
           {role === "AGENT" ? (
-            <label className="field">
+            <label className="field-console">
               <span>Polling unit</span>
               <select
                 value={agentForm.pollingUnitId}
@@ -613,17 +618,17 @@ export default function AdminManageCreatePage() {
             </label>
           ) : null}
 
-          <div className="action-row">
-            <button className="button" type="button" disabled={saving} onClick={() => void handleSave()}>
+          <div className="btn-row">
+            <button className="btn btn-primary" type="button" disabled={saving} onClick={() => void handleSave()}>
               {saving ? "Saving..." : mode === "create" ? `Create ${role}` : `Save ${role}`}
             </button>
-            <Link className="button secondary" href="/admin/manage/users">Back to user list</Link>
+            <Link className="btn" href="/admin/manage/users">Back to user list</Link>
           </div>
           {role === "AGENT" && agentForm.wardId && pollingUnits.length === 0 ? (
-            <p className="muted">No polling units are loaded for this ward yet. Load or sync polling units before creating agents in this territory.</p>
+            <p className="muted-text">No polling units are loaded for this ward yet. Load or sync polling units before creating agents in this territory.</p>
           ) : null}
           {role === "AGENT" ? (
-            <p className="muted">Each agent is assigned to a single polling unit and is linked automatically to the admin responsible for that territory.</p>
+            <p className="muted-text">Each agent is assigned to a single polling unit and is linked automatically to the admin responsible for that territory.</p>
           ) : null}
         </div>
       </section>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 /**
  * Dispatch console primitives.
@@ -247,5 +247,123 @@ export function Field({
       {hint && !error ? <span className="field-hint">{hint}</span> : null}
       {error ? <span className="field-error">{error}</span> : null}
     </label>
+  );
+}
+
+/* ---- Toolbars ---------------------------------------------------------- */
+
+/**
+ * The filter row above a queue.
+ *
+ * Filters were hand-laid on every list screen and drifted: different gaps,
+ * different order, and controls with no label at all — a bare select beside a
+ * bare text box, where the only clue to what either filtered was the value that
+ * happened to be selected. `Toolbar` fixes the position; `ToolbarField` makes
+ * the label mandatory, and `hideLabel` still leaves it for a screen reader
+ * rather than dropping it.
+ */
+export function Toolbar({ children }: { children: ReactNode }) {
+  return <div className="toolbar">{children}</div>;
+}
+
+export function ToolbarField({
+  label,
+  hideLabel,
+  children,
+}: {
+  label: string;
+  hideLabel?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <label>
+      <span className={hideLabel ? "sr-only" : undefined}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+export function ToolbarEnd({ children }: { children: ReactNode }) {
+  return <div className="toolbar-end">{children}</div>;
+}
+
+/* ---- Layout ------------------------------------------------------------ */
+
+export function PanelGrid({ wide, children }: { wide?: boolean; children: ReactNode }) {
+  return <div className={wide ? "panel-grid panel-grid-wide" : "panel-grid"}>{children}</div>;
+}
+
+/* ---- KPI hierarchy ----------------------------------------------------- */
+
+/**
+ * The few figures a screen is actually about.
+ *
+ * Distinct from `Stat`, which is a dense strip of secondary detail. A dashboard
+ * of fourteen identical tiles asserts that fourteen things matter equally; in
+ * practice four or five do, and the rest are supporting detail that belongs
+ * below them rather than beside them.
+ */
+export function KpiRow({ children }: { children: ReactNode }) {
+  return <div className="kpi-row">{children}</div>;
+}
+
+export function Kpi({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: ReactNode;
+  note?: ReactNode;
+  tone?: "accent" | "warn";
+}) {
+  const cls = tone === "accent" ? "kpi kpi-accent" : tone === "warn" ? "kpi kpi-warn" : "kpi";
+  return (
+    <div className={cls}>
+      <span className="kpi-label">{label}</span>
+      <span className="kpi-value">{value}</span>
+      {note ? <span className="kpi-note">{note}</span> : null}
+    </div>
+  );
+}
+
+/* ---- Detail ------------------------------------------------------------ */
+
+/**
+ * Label/value pairs as a real definition list.
+ *
+ * Detail panes wrote "Status: PAID | 12 assignments | NGN 40000" into a single
+ * paragraph, which pairs nothing for a screen reader and gives the eye no
+ * column to scan. Rows with a null value are dropped rather than rendered as an
+ * empty cell.
+ */
+export function DetailList({
+  rows,
+}: {
+  rows: Array<{ label: string; value: ReactNode } | null | false | undefined>;
+}) {
+  const present = rows.filter((row): row is { label: string; value: ReactNode } => Boolean(row));
+  if (!present.length) return null;
+  return (
+    <dl className="detail-list">
+      {present.map((row) => (
+        <Fragment key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
+/* ---- Table states ------------------------------------------------------ */
+
+/** An empty queue reads as an empty queue, not as a table that failed to load. */
+export function EmptyRow({ colSpan, children }: { colSpan: number; children: ReactNode }) {
+  return (
+    <tr className="table-empty">
+      <td colSpan={colSpan}>{children}</td>
+    </tr>
   );
 }

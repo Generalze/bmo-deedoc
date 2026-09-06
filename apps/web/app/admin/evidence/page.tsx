@@ -35,6 +35,22 @@ import {
   updateEvidenceReview,
   verifyEvidenceManifest,
 } from "../../../lib/api";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  StatusPill,
+  Toolbar,
+  ToolbarField,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const reviewerRoles = new Set(["SUPER_ADMIN", "STATE_OFFICER", "VALIDATOR"]);
@@ -126,6 +142,7 @@ export default function AdminEvidencePage() {
   const [exportPurpose, setExportPurpose] = useState("Controlled post-election evidence review package");
   const [selectedLegalCaseId, setSelectedLegalCaseId] = useState("");
   const [lastManifest, setLastManifest] = useState<{ manifest: EvidenceManifest; manifestSha256: string } | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "success" | "error" | "info"; message: string }>({ tone: "success", message: "" });
@@ -359,339 +376,568 @@ export default function AdminEvidencePage() {
 
   if (loading && !user) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading evidence workspace...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Evidence" />
+        <StateView kind="loading" title="Loading evidence workspace…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load evidence</h1>
-          <FeedbackBanner tone={feedback.tone} message={feedback.message || "Authentication is required."} />
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Evidence" />
+        <StateView
+          kind="error"
+          title="Unable to load evidence"
+          detail={feedback.message || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Post-election source of truth</p>
-        <h1>Evidence explorer and controlled export</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || user.coordinatorProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-        <p className="muted">Originals remain private and immutable. Every view, download, review, case association, and export is backend-authorized and audited.</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Evidence explorer"
+        lead={`Visible scope: ${describeTerritory(
+          user.adminProfile ||
+            user.coordinatorProfile || {
+              geoPoliticalZoneId: null,
+              stateId: null,
+              senatorialDistrictId: null,
+              federalConstituencyId: null,
+              lgaId: null,
+              wardId: null,
+              stateConstituencyId: null,
+              pollingUnitId: null,
+            },
+        )} · Originals remain private and immutable. Every view, download, review, case association and export is backend-authorised and audited.`}
+      />
 
       <AdminNav role={user?.role} />
-      <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Total Evidence</h2>
-          <div className="value">{summary.total}</div>
-        </article>
-        <article className="panel card">
-          <h2>Returned</h2>
-          <div className="value">{summary.returned}</div>
-        </article>
-        <article className="panel card">
-          <h2>Selected</h2>
-          <div className="value">{selectedEvidenceIds.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Legal Workspaces</h2>
-          <div className="value">{legalCases.length}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Search and Filters</h2>
-            <p className="muted">Search by ID, hash, file name, incident, report, or Polling Unit. Filters are enforced again by the API.</p>
+        <KpiRow>
+          <Kpi label="Total evidence" value={formatCount(summary.total)} note="In your visible scope" />
+          <Kpi label="Returned" value={formatCount(summary.returned)} note="Matching the current filters" />
+          <Kpi
+            label="Selected"
+            value={formatCount(selectedEvidenceIds.length)}
+            note="For case association or export"
+            tone={selectedEvidenceIds.length > 0 ? "accent" : undefined}
+          />
+          <Kpi label="Legal workspaces" value={formatCount(legalCases.length)} />
+        </KpiRow>
+
+        <Panel
+          title="Search and filters"
+          meta="Filters are enforced again by the API"
+          actions={
+            <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleFilter()} disabled={busy || loading}>
+              {loading ? "Loading…" : "Apply filters"}
+            </button>
+          }
+        >
+          <div className="form-grid">
+            <Field label="Search" hint="ID, file name, hash, incident, report or Polling Unit.">
+              <input
+                type="search"
+                value={filters.search}
+                onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+              />
+            </Field>
+            <Field label="Evidence type">
+              <select
+                value={filters.evidenceType}
+                onChange={(event) => setFilters((current) => ({ ...current, evidenceType: event.target.value as Filters["evidenceType"] }))}
+              >
+                <option value="">All types</option>
+                {EVIDENCE_TYPES.map((option) => (
+                  <option key={option} value={option}>
+                    {option.replace(/_/g, " ").toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Classification">
+              <select
+                value={filters.classification}
+                onChange={(event) => setFilters((current) => ({ ...current, classification: event.target.value as Filters["classification"] }))}
+              >
+                <option value="">All classifications</option>
+                {EVIDENCE_CLASSIFICATIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option.replace(/_/g, " ").toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Review status">
+              <select
+                value={filters.reviewStatus}
+                onChange={(event) => setFilters((current) => ({ ...current, reviewStatus: event.target.value as Filters["reviewStatus"] }))}
+              >
+                <option value="">All statuses</option>
+                {EVIDENCE_REVIEW_STATUSES.map((option) => (
+                  <option key={option} value={option}>
+                    {option.replace(/_/g, " ").toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Polling Unit ID">
+              <input
+                value={filters.pollingUnitId}
+                onChange={(event) => setFilters((current) => ({ ...current, pollingUnitId: event.target.value }))}
+              />
+            </Field>
+            <Field label="Incident ID">
+              <input
+                value={filters.incidentId}
+                onChange={(event) => setFilters((current) => ({ ...current, incidentId: event.target.value }))}
+              />
+            </Field>
+            <Field label="Report ID">
+              <input
+                value={filters.electionReportId}
+                onChange={(event) => setFilters((current) => ({ ...current, electionReportId: event.target.value }))}
+              />
+            </Field>
+            <Field label="SHA-256">
+              <input
+                value={filters.sha256}
+                onChange={(event) => setFilters((current) => ({ ...current, sha256: event.target.value }))}
+              />
+            </Field>
+            <Field label="Date from">
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+              />
+            </Field>
+            <Field label="Date to">
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
+              />
+            </Field>
           </div>
-          <button className="button" type="button" onClick={() => void handleFilter()} disabled={busy || loading}>
-            {loading ? "Loading..." : "Apply filters"}
-          </button>
+        </Panel>
+
+        <div className="workbench">
+          <Panel
+            title="Scoped evidence"
+            meta={`${formatCount(evidence.length)} visible`}
+            flush
+          >
+            <DataTable
+              head={
+                <tr>
+                  <th className="select-col">
+                    <span className="sr-only">Select</span>
+                  </th>
+                  <th>File</th>
+                  <th>Type</th>
+                  <th>Classification</th>
+                  <th>Review</th>
+                  <th>Location</th>
+                  <th>Received</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {evidence.length === 0 ? (
+                <EmptyRow colSpan={8}>No evidence matches the current scope and filters.</EmptyRow>
+              ) : (
+                evidence.flatMap((asset) => {
+                  const draft = reviewDrafts[asset.id] || {
+                    status: asset.reviewStatus,
+                    classification: asset.classification,
+                    note: "",
+                  };
+                  const open = reviewingId === asset.id;
+                  const rows = [
+                    <tr key={asset.id} className={open ? "row-open" : undefined}>
+                      <td className="select-col">
+                        <span className="select-cell">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${asset.originalFileName}`}
+                            checked={selectedEvidenceIds.includes(asset.id)}
+                            onChange={() => toggleSelected(asset.id)}
+                          />
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{asset.originalFileName}</strong>
+                        <div className="mono">{compactHash(asset.sha256)}</div>
+                        {!asset.preservation.originalImmutable ? (
+                          <span className="pill pill-error">original not immutable</span>
+                        ) : null}
+                      </td>
+                      <td className="muted-text">{asset.evidenceType.replace(/_/g, " ").toLowerCase()}</td>
+                      <td className="muted-text">{asset.classification.replace(/_/g, " ").toLowerCase()}</td>
+                      <td>
+                        <StatusPill status={asset.reviewStatus} />
+                      </td>
+                      <td className="muted-text">
+                        {asset.territory.pollingUnitId ? `PU ${asset.territory.pollingUnitId}` : "—"}
+                        {asset.incidentId ? <div>Incident {asset.incidentId}</div> : null}
+                        {asset.electionReportId ? <div>Report {asset.electionReportId}</div> : null}
+                      </td>
+                      <td className="muted-text">{new Date(asset.serverReceivedAt).toLocaleString()}</td>
+                      <td className="actions">
+                        <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                          <button className="btn btn-sm" type="button" onClick={() => void handleAccess(asset.id, "VIEW")} disabled={busy}>
+                            View
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() => void handleAccess(asset.id, "DOWNLOAD")}
+                            disabled={busy}
+                          >
+                            Download
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            aria-expanded={open}
+                            onClick={() => setReviewingId(open ? null : asset.id)}
+                          >
+                            {open ? "Close" : "Review"}
+                          </button>
+                        </span>
+                      </td>
+                    </tr>,
+                  ];
+
+                  if (open) {
+                    rows.push(
+                      <tr key={`${asset.id}-editor`} className="row-editor">
+                        <td colSpan={8}>
+                          <div className="stack-3">
+                            <div className="form-grid">
+                              <Field label="Next status">
+                                <select
+                                  value={draft.status}
+                                  onChange={(event) =>
+                                    setReviewDrafts((current) => ({
+                                      ...current,
+                                      [asset.id]: { ...draft, status: event.target.value as EvidenceReviewStatus },
+                                    }))
+                                  }
+                                >
+                                  {EVIDENCE_REVIEW_STATUSES.map((option) => (
+                                    <option key={option} value={option}>
+                                      {option.replace(/_/g, " ").toLowerCase()}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Field>
+                              <Field label="Classification">
+                                <select
+                                  value={draft.classification}
+                                  onChange={(event) =>
+                                    setReviewDrafts((current) => ({
+                                      ...current,
+                                      [asset.id]: { ...draft, classification: event.target.value as EvidenceClassification },
+                                    }))
+                                  }
+                                >
+                                  {EVIDENCE_CLASSIFICATIONS.map((option) => (
+                                    <option key={option} value={option}>
+                                      {option.replace(/_/g, " ").toLowerCase()}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Field>
+                            </div>
+                            <Field label="Review note">
+                              <textarea
+                                rows={2}
+                                value={draft.note}
+                                onChange={(event) =>
+                                  setReviewDrafts((current) => ({
+                                    ...current,
+                                    [asset.id]: { ...draft, note: event.target.value },
+                                  }))
+                                }
+                              />
+                            </Field>
+                            <div className="split">
+                              <span className="mono">SHA-256 {asset.sha256}</span>
+                              <span className="split-end">
+                                <button className="btn btn-primary" type="button" onClick={() => void handleReview(asset.id)} disabled={busy}>
+                                  Save review
+                                </button>
+                              </span>
+                            </div>
+                            {asset.custodyEvents?.length ? (
+                              <DetailList
+                                rows={asset.custodyEvents.slice(-4).map((event) => ({
+                                  label: event.eventType.replace(/_/g, " "),
+                                  value: `${new Date(event.createdAt).toLocaleString()} · ${event.actorUserId || "System"}`,
+                                }))}
+                              />
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>,
+                    );
+                  }
+
+                  return rows;
+                })
+              )}
+            </DataTable>
+          </Panel>
+
+          <Panel title="Upload evidence" meta="Server SHA-256 is authoritative">
+            <div className="stack-3">
+              <Field label="File">
+                <input type="file" onChange={(event) => setSelectedFile(event.target.files?.[0] || null)} />
+              </Field>
+              <div className="form-grid">
+                <Field label="Type">
+                  <select
+                    value={uploadDraft.evidenceType}
+                    onChange={(event) => setUploadDraft((current) => ({ ...current, evidenceType: event.target.value as EvidenceType }))}
+                  >
+                    {EVIDENCE_TYPES.map((option) => (
+                      <option key={option} value={option}>
+                        {option.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Classification">
+                  <select
+                    value={uploadDraft.classification}
+                    onChange={(event) =>
+                      setUploadDraft((current) => ({ ...current, classification: event.target.value as EvidenceClassification }))
+                    }
+                  >
+                    {EVIDENCE_CLASSIFICATIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Polling Unit ID" hint="Attach the original to a Polling Unit, incident or report.">
+                <input
+                  value={uploadDraft.pollingUnitId}
+                  onChange={(event) => setUploadDraft((current) => ({ ...current, pollingUnitId: event.target.value }))}
+                />
+              </Field>
+              <Field label="Incident ID">
+                <input
+                  value={uploadDraft.incidentId}
+                  onChange={(event) => setUploadDraft((current) => ({ ...current, incidentId: event.target.value }))}
+                />
+              </Field>
+              <Field label="Election report ID">
+                <input
+                  value={uploadDraft.electionReportId}
+                  onChange={(event) => setUploadDraft((current) => ({ ...current, electionReportId: event.target.value }))}
+                />
+              </Field>
+              <Field label="Captured at">
+                <input
+                  type="datetime-local"
+                  value={uploadDraft.capturedAt}
+                  onChange={(event) => setUploadDraft((current) => ({ ...current, capturedAt: event.target.value }))}
+                />
+              </Field>
+              <div className="form-grid">
+                <Field label="Latitude">
+                  <input
+                    value={uploadDraft.latitude}
+                    onChange={(event) => setUploadDraft((current) => ({ ...current, latitude: event.target.value }))}
+                  />
+                </Field>
+                <Field label="Longitude">
+                  <input
+                    value={uploadDraft.longitude}
+                    onChange={(event) => setUploadDraft((current) => ({ ...current, longitude: event.target.value }))}
+                  />
+                </Field>
+                <Field label="Accuracy (m)">
+                  <input
+                    value={uploadDraft.accuracyMeters}
+                    onChange={(event) => setUploadDraft((current) => ({ ...current, accuracyMeters: event.target.value }))}
+                  />
+                </Field>
+              </div>
+              <div className="btn-row">
+                <button className="btn btn-primary" type="button" onClick={() => void handleUpload()} disabled={busy}>
+                  Finalise upload
+                </button>
+              </div>
+            </div>
+          </Panel>
         </div>
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-          <label className="field">
-            <span>Search</span>
-            <input value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} placeholder="ID, file, hash, PU" />
-          </label>
-          <label className="field">
-            <span>Evidence Type</span>
-            <select value={filters.evidenceType} onChange={(event) => setFilters((current) => ({ ...current, evidenceType: event.target.value as Filters["evidenceType"] }))}>
-              <option value="">All types</option>
-              {EVIDENCE_TYPES.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Classification</span>
-            <select value={filters.classification} onChange={(event) => setFilters((current) => ({ ...current, classification: event.target.value as Filters["classification"] }))}>
-              <option value="">All classifications</option>
-              {EVIDENCE_CLASSIFICATIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Review Status</span>
-            <select value={filters.reviewStatus} onChange={(event) => setFilters((current) => ({ ...current, reviewStatus: event.target.value as Filters["reviewStatus"] }))}>
-              <option value="">All statuses</option>
-              {EVIDENCE_REVIEW_STATUSES.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Polling Unit ID</span>
-            <input value={filters.pollingUnitId} onChange={(event) => setFilters((current) => ({ ...current, pollingUnitId: event.target.value }))} />
-          </label>
-          <label className="field">
-            <span>Incident ID</span>
-            <input value={filters.incidentId} onChange={(event) => setFilters((current) => ({ ...current, incidentId: event.target.value }))} />
-          </label>
-          <label className="field">
-            <span>Report ID</span>
-            <input value={filters.electionReportId} onChange={(event) => setFilters((current) => ({ ...current, electionReportId: event.target.value }))} />
-          </label>
-          <label className="field">
-            <span>SHA-256</span>
-            <input value={filters.sha256} onChange={(event) => setFilters((current) => ({ ...current, sha256: event.target.value }))} />
-          </label>
-          <label className="field">
-            <span>Date From</span>
-            <input type="date" value={filters.dateFrom} onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))} />
-          </label>
-          <label className="field">
-            <span>Date To</span>
-            <input type="date" value={filters.dateTo} onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))} />
-          </label>
-        </div>
-      </section>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)" }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Scoped Evidence</h2>
-              <p className="muted">Select assets for legal association or controlled manifest export.</p>
-            </div>
-            <span className="status-pill">{evidence.length} visible</span>
-          </div>
-          {evidence.length === 0 ? (
-            <p className="muted">No evidence matches the current scope and filters.</p>
-          ) : (
-            <div className="reward-list">
-              {evidence.map((asset) => {
-                const draft = reviewDrafts[asset.id] || { status: asset.reviewStatus, classification: asset.classification, note: "" };
-                return (
-                  <article key={asset.id} className="reward-item">
-                    <label className="checkbox-field">
-                      <input type="checkbox" checked={selectedEvidenceIds.includes(asset.id)} onChange={() => toggleSelected(asset.id)} />
-                      <strong>{asset.originalFileName}</strong>
-                    </label>
-                    <p>{asset.evidenceType} | {asset.classification} | {asset.reviewStatus}</p>
-                    <p className="muted">SHA-256: {asset.sha256}</p>
-                    <p className="muted">PU: {asset.territory.pollingUnitId || "N/A"} | Incident: {asset.incidentId || "N/A"} | Report: {asset.electionReportId || "N/A"}</p>
-                    <p className="muted">Server received: {new Date(asset.serverReceivedAt).toLocaleString()} | Original immutable: {asset.preservation.originalImmutable ? "YES" : "NO"}</p>
-                    <div className="action-row" style={{ marginTop: 12 }}>
-                      <button className="button secondary" type="button" onClick={() => void handleAccess(asset.id, "VIEW")} disabled={busy}>View Original</button>
-                      <button className="button secondary" type="button" onClick={() => void handleAccess(asset.id, "DOWNLOAD")} disabled={busy}>Download Original</button>
-                    </div>
-                    <div className="grid" style={{ marginTop: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
-                      <label className="field">
-                        <span>Next status</span>
-                        <select value={draft.status} onChange={(event) => setReviewDrafts((current) => ({ ...current, [asset.id]: { ...draft, status: event.target.value as EvidenceReviewStatus } }))}>
-                          {EVIDENCE_REVIEW_STATUSES.map((option) => <option key={option} value={option}>{option}</option>)}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Classification</span>
-                        <select value={draft.classification} onChange={(event) => setReviewDrafts((current) => ({ ...current, [asset.id]: { ...draft, classification: event.target.value as EvidenceClassification } }))}>
-                          {EVIDENCE_CLASSIFICATIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                    <label className="field" style={{ marginTop: 12 }}>
-                      <span>Review note</span>
-                      <textarea rows={2} value={draft.note} onChange={(event) => setReviewDrafts((current) => ({ ...current, [asset.id]: { ...draft, note: event.target.value } }))} />
-                    </label>
-                    <button className="button" type="button" onClick={() => void handleReview(asset.id)} disabled={busy}>Save Review</button>
-                    {asset.custodyEvents?.length ? (
-                      <div className="reward-list" style={{ marginTop: 12 }}>
-                        {asset.custodyEvents.slice(-4).map((event) => (
-                          <article key={event.id} className="reward-item">
-                            <strong>{event.eventType}</strong>
-                            <p className="muted">{new Date(event.createdAt).toLocaleString()} | Actor: {event.actorUserId || "System"}</p>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        <PanelGrid>
+          <Panel
+            title="Territory aggregation"
+            actions={
+              <button className="btn btn-sm" type="button" onClick={() => void handleFilter()} disabled={busy}>
+                Refresh
+              </button>
+            }
+            flush
+          >
+            <Toolbar>
+              <ToolbarField label="Group by">
+                <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}>
+                  {groupOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option.replace(/_/g, " ").toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </ToolbarField>
+            </Toolbar>
+            <DataTable
+              head={
+                <tr>
+                  <th>Territory</th>
+                  <th className="numeric">Assets</th>
+                  <th>Latest received</th>
+                </tr>
+              }
+            >
+              {aggregation.length === 0 ? (
+                <EmptyRow colSpan={3}>No evidence to roll up in this scope.</EmptyRow>
+              ) : (
+                aggregation.slice(0, 12).map((item) => (
+                  <tr key={`${item.territoryKind}-${item.territoryId}`}>
+                    <td>{item.territoryId}</td>
+                    <td className="numeric">{formatCount(item.evidenceCount)}</td>
+                    <td className="muted-text">
+                      {item.latestServerReceivedAt ? new Date(item.latestServerReceivedAt).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-        <aside className="panel card">
-          <h2>Upload Evidence</h2>
-          <p className="muted">Attach originals to a Polling Unit, incident, or election report. Server SHA-256 is authoritative.</p>
-          <div className="form">
-            <label className="field">
-              <span>File</span>
-              <input type="file" onChange={(event) => setSelectedFile(event.target.files?.[0] || null)} />
-            </label>
-            <label className="field">
-              <span>Type</span>
-              <select value={uploadDraft.evidenceType} onChange={(event) => setUploadDraft((current) => ({ ...current, evidenceType: event.target.value as EvidenceType }))}>
-                {EVIDENCE_TYPES.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Classification</span>
-              <select value={uploadDraft.classification} onChange={(event) => setUploadDraft((current) => ({ ...current, classification: event.target.value as EvidenceClassification }))}>
-                {EVIDENCE_CLASSIFICATIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Polling Unit ID</span>
-              <input value={uploadDraft.pollingUnitId} onChange={(event) => setUploadDraft((current) => ({ ...current, pollingUnitId: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Incident ID</span>
-              <input value={uploadDraft.incidentId} onChange={(event) => setUploadDraft((current) => ({ ...current, incidentId: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Election Report ID</span>
-              <input value={uploadDraft.electionReportId} onChange={(event) => setUploadDraft((current) => ({ ...current, electionReportId: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Captured At</span>
-              <input type="datetime-local" value={uploadDraft.capturedAt} onChange={(event) => setUploadDraft((current) => ({ ...current, capturedAt: event.target.value }))} />
-            </label>
-            <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-              <label className="field">
-                <span>Lat</span>
-                <input value={uploadDraft.latitude} onChange={(event) => setUploadDraft((current) => ({ ...current, latitude: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span>Lng</span>
-                <input value={uploadDraft.longitude} onChange={(event) => setUploadDraft((current) => ({ ...current, longitude: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span>Accuracy</span>
-                <input value={uploadDraft.accuracyMeters} onChange={(event) => setUploadDraft((current) => ({ ...current, accuracyMeters: event.target.value }))} />
-              </label>
-            </div>
-            <button className="button" type="button" onClick={() => void handleUpload()} disabled={busy}>Finalize Upload</button>
-          </div>
-        </aside>
-      </section>
+          <Panel title="Polling Unit dossier" meta="Reconstructed from activities, incidents, reports, evidence and custody">
+            <div className="stack-3">
+              <div className="split">
+                <Field label="Polling Unit ID">
+                  <input value={timelinePollingUnitId} onChange={(event) => setTimelinePollingUnitId(event.target.value)} />
+                </Field>
+                <span className="split-end">
+                  <button className="btn" type="button" onClick={() => void handleTimeline()} disabled={busy}>
+                    Load
+                  </button>
+                </span>
+              </div>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Ward / Constituency Aggregation</h2>
-              <p className="muted">Roll up visible evidence by command territory.</p>
+              {dossier ? (
+                <>
+                  <DetailList
+                    rows={[
+                      { label: "Evidence", value: formatCount(dossier.completeness.evidenceCount) },
+                      { label: "Incidents", value: formatCount(dossier.completeness.incidentCount) },
+                      { label: "Reports", value: formatCount(dossier.completeness.reportCount) },
+                      { label: "Custody events", value: formatCount(dossier.completeness.custodyEventCount) },
+                    ]}
+                  />
+                  <DataTable
+                    caption="Timeline"
+                    head={
+                      <tr>
+                        <th>Type</th>
+                        <th>Entry</th>
+                        <th>When</th>
+                      </tr>
+                    }
+                  >
+                    {timeline.length === 0 ? (
+                      <EmptyRow colSpan={3}>No timeline entries.</EmptyRow>
+                    ) : (
+                      timeline.slice(0, 10).map((item) => (
+                        <tr key={`${item.type}-${item.id}-${item.occurredAt}`}>
+                          <td className="muted-text">{item.type.replace(/_/g, " ").toLowerCase()}</td>
+                          <td>
+                            {item.label}
+                            {item.sha256 ? <div className="mono">{compactHash(item.sha256)}</div> : null}
+                          </td>
+                          <td className="muted-text">{new Date(item.occurredAt).toLocaleString()}</td>
+                        </tr>
+                      ))
+                    )}
+                  </DataTable>
+                </>
+              ) : (
+                <StateView kind="empty" title="Load a Polling Unit to reconstruct its dossier" />
+              )}
             </div>
-            <label className="field">
-              <span>Group</span>
-              <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}>
-                {groupOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-          </div>
-          <button className="button secondary" type="button" onClick={() => void handleFilter()} disabled={busy}>Refresh aggregation</button>
-          <div className="reward-list" style={{ marginTop: 12 }}>
-            {aggregation.slice(0, 8).map((item) => (
-              <article key={`${item.territoryKind}-${item.territoryId}`} className="reward-item">
-                <strong>{item.territoryId}</strong>
-                <p>{item.evidenceCount} evidence asset(s)</p>
-                <p className="muted">Latest: {item.latestServerReceivedAt ? new Date(item.latestServerReceivedAt).toLocaleString() : "N/A"}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+          </Panel>
 
-        <section className="panel card">
-          <h2>PU Timeline and Dossier</h2>
-          <p className="muted">Reconstruct a Polling Unit record from activities, incidents, reports, evidence, custody, and hashes.</p>
-          <div className="action-row">
-            <label className="field" style={{ flex: 1 }}>
-              <span>Polling Unit ID</span>
-              <input value={timelinePollingUnitId} onChange={(event) => setTimelinePollingUnitId(event.target.value)} />
-            </label>
-            <button className="button" type="button" onClick={() => void handleTimeline()} disabled={busy} style={{ alignSelf: "end" }}>Load</button>
-          </div>
-          {dossier ? (
-            <div className="reward-list" style={{ marginTop: 12 }}>
-              <article className="reward-item">
-                <strong>Dossier completeness</strong>
-                <p>{dossier.completeness.evidenceCount} evidence | {dossier.completeness.incidentCount} incidents | {dossier.completeness.reportCount} reports | {dossier.completeness.custodyEventCount} custody events</p>
-              </article>
-              {timeline.slice(0, 8).map((item) => (
-                <article key={`${item.type}-${item.id}-${item.occurredAt}`} className="reward-item">
-                  <strong>{item.type}</strong>
-                  <p>{item.label}</p>
-                  <p className="muted">{new Date(item.occurredAt).toLocaleString()} {item.sha256 ? `| ${compactHash(item.sha256)}` : ""}</p>
-                </article>
-              ))}
+          <Panel title="Legal support and export" meta="Exports are manifest-only until archive packaging exists">
+            <div className="stack-3">
+              <Field label="Workspace title">
+                <input value={legalTitle} onChange={(event) => setLegalTitle(event.target.value)} />
+              </Field>
+              <Field label="Description">
+                <textarea rows={2} value={legalDescription} onChange={(event) => setLegalDescription(event.target.value)} />
+              </Field>
+              <div className="btn-row">
+                <button className="btn" type="button" onClick={() => void handleCreateLegalCase()} disabled={busy}>
+                  Create case from selection
+                </button>
+              </div>
+              <Field label="Existing workspace">
+                <select value={selectedLegalCaseId} onChange={(event) => setSelectedLegalCaseId(event.target.value)}>
+                  <option value="">No workspace</option>
+                  {legalCases.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.title} ({item.evidenceCount})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Export purpose" hint="Recorded with the manifest.">
+                <textarea rows={2} value={exportPurpose} onChange={(event) => setExportPurpose(event.target.value)} />
+              </Field>
+              <div className="btn-row">
+                <button className="btn btn-primary" type="button" onClick={() => void handleExport()} disabled={busy}>
+                  Generate controlled manifest
+                </button>
+                <button className="btn" type="button" onClick={() => void handleVerifyManifest()} disabled={busy || !lastManifest}>
+                  Verify manifest SHA-256
+                </button>
+              </div>
+              {lastManifest ? (
+                <DetailList
+                  rows={[
+                    { label: "Items", value: formatCount(lastManifest.manifest.items.length) },
+                    { label: "Manifest SHA-256", value: <span className="mono">{lastManifest.manifestSha256}</span> },
+                    { label: "Packaging", value: lastManifest.manifest.archivePackagingStatus },
+                  ]}
+                />
+              ) : null}
             </div>
-          ) : null}
-        </section>
-
-        <section className="panel card">
-          <h2>Legal Support and Export</h2>
-          <p className="muted">Workspaces organize evidence for review only. Exports are manifest-only until archive packaging is implemented.</p>
-          <div className="form">
-            <label className="field">
-              <span>Workspace Title</span>
-              <input value={legalTitle} onChange={(event) => setLegalTitle(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Description</span>
-              <textarea rows={2} value={legalDescription} onChange={(event) => setLegalDescription(event.target.value)} />
-            </label>
-            <button className="button secondary" type="button" onClick={() => void handleCreateLegalCase()} disabled={busy}>Create Case From Selection</button>
-            <label className="field">
-              <span>Existing Workspace</span>
-              <select value={selectedLegalCaseId} onChange={(event) => setSelectedLegalCaseId(event.target.value)}>
-                <option value="">No workspace</option>
-                {legalCases.map((item) => <option key={item.id} value={item.id}>{item.title} ({item.evidenceCount})</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Export Purpose</span>
-              <textarea rows={2} value={exportPurpose} onChange={(event) => setExportPurpose(event.target.value)} />
-            </label>
-            <button className="button" type="button" onClick={() => void handleExport()} disabled={busy}>Generate Controlled Manifest</button>
-            <button className="button secondary" type="button" onClick={() => void handleVerifyManifest()} disabled={busy || !lastManifest}>Verify Manifest SHA-256</button>
-            {lastManifest ? (
-              <article className="reward-item">
-                <strong>Last manifest</strong>
-                <p>{lastManifest.manifest.items.length} item(s)</p>
-                <p className="muted">{lastManifest.manifestSha256}</p>
-                <p className="muted">{lastManifest.manifest.archivePackagingStatus}</p>
-              </article>
-            ) : null}
-          </div>
-        </section>
-      </section>
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }

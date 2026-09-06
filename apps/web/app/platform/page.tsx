@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthUserProfile, OgunOrganizationTree } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchOgunOrganizationTree, logoutCurrentUser } from "../../lib/api";
+import { DataTable, DetailList, EmptyRow, Notice, PageHead, Panel, formatCount } from "../../components/ui";
 import { clearSession, readSession } from "../../lib/session";
 
 export default function PlatformOrganizationPage() {
@@ -42,54 +43,96 @@ export default function PlatformOrganizationPage() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Ogun command architecture</p>
-        <h1>Organization tree</h1>
-        <p>
-          {user
-            ? `${user.name} | ${user.role}${user.coordinatorProfile ? ` | ${user.coordinatorProfile.level}` : ""}`
-            : "Loading authorized territory..."}
-        </p>
-        <button className="button secondary" type="button" onClick={() => void signOut()}>Sign out</button>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Organisation tree"
+        lead={
+          user
+            ? `${user.name} · ${user.role.replace(/_/g, " ").toLowerCase()}${
+                user.coordinatorProfile ? ` · ${user.coordinatorProfile.level.replace(/_/g, " ").toLowerCase()}` : ""
+              }`
+            : "Loading authorised territory…"
+        }
+        actions={
+          <button className="btn" type="button" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        }
+      />
 
-      {error ? (
-        <section className="panel" style={{ marginTop: 24 }}>
-          <h2>Organization data unavailable</h2>
-          <p className="error">{error}</p>
-          <p className="muted">Assignments remain blocked until authoritative Ogun command relationships are complete.</p>
-        </section>
-      ) : null}
+      <div className="stack-4">
+        {error ? (
+          <Notice tone="error" title="Organisation data unavailable">
+            <span>{error}</span>
+            <span className="muted-text">
+              Assignments remain blocked until authoritative Ogun command relationships are complete.
+            </span>
+          </Notice>
+        ) : null}
 
-      {tree ? (
-        <section className="panel" style={{ marginTop: 24 }}>
-          <h2>{tree.name}</h2>
-          <p className="muted">State Officers: {tree.stateOfficers.map((officer) => officer.name).join(", ") || "Hidden for scoped view"}</p>
-          <div className="card-grid">
+        {tree ? (
+          <>
+            <Panel title={tree.name} meta={`${formatCount(tree.senatorialDistricts.length)} senatorial districts`}>
+              <DetailList
+                rows={[
+                  {
+                    label: "State officers",
+                    value: tree.stateOfficers.map((officer) => officer.name).join(", ") || "Hidden for scoped view",
+                  },
+                ]}
+              />
+            </Panel>
+
             {tree.senatorialDistricts.map((senatorial) => (
-              <article className="card" key={senatorial.id}>
-                <p className="eyebrow">Senatorial District</p>
-                <h3>{senatorial.name}</h3>
-                <p className="muted">{senatorial.coordinators.length} assigned coordinator(s)</p>
-                {senatorial.federalConstituencies.map((federal) => (
-                  <div key={federal.id} style={{ marginTop: 18 }}>
-                    <strong>{federal.name}</strong>
-                    <p className="muted">
-                      {federal.stateConstituencies.length} State Constituency branch(es) | {federal.coordinators.length} coordinator(s)
-                    </p>
-                    {federal.stateConstituencies.map((stateConstituency) => (
-                      <p key={stateConstituency.id}>
-                        {stateConstituency.name}: {stateConstituency.wards.length} Ward(s)
-                      </p>
-                    ))}
-                  </div>
-                ))}
-              </article>
+              <Panel
+                key={senatorial.id}
+                title={senatorial.name}
+                meta={`${formatCount(senatorial.coordinators.length)} coordinators`}
+                flush
+              >
+                <DataTable
+                  head={
+                    <tr>
+                      <th>Federal constituency</th>
+                      <th>State constituency</th>
+                      <th className="numeric">Wards</th>
+                      <th className="numeric">Coordinators</th>
+                    </tr>
+                  }
+                >
+                  {senatorial.federalConstituencies.length === 0 ? (
+                    <EmptyRow colSpan={4}>No federal constituencies loaded for this district.</EmptyRow>
+                  ) : (
+                    senatorial.federalConstituencies.flatMap((federal) =>
+                      federal.stateConstituencies.length === 0
+                        ? [
+                            <tr key={federal.id}>
+                              <td>{federal.name}</td>
+                              <td className="muted-text">No state constituency loaded</td>
+                              <td className="numeric">—</td>
+                              <td className="numeric">{formatCount(federal.coordinators.length)}</td>
+                            </tr>,
+                          ]
+                        : federal.stateConstituencies.map((stateConstituency, index) => (
+                            <tr key={stateConstituency.id}>
+                              {/* The federal constituency names its group once,
+                                  rather than repeating on every child row. */}
+                              <td>{index === 0 ? federal.name : ""}</td>
+                              <td>{stateConstituency.name}</td>
+                              <td className="numeric">{formatCount(stateConstituency.wards.length)}</td>
+                              <td className="numeric">
+                                {index === 0 ? formatCount(federal.coordinators.length) : ""}
+                              </td>
+                            </tr>
+                          )),
+                    )
+                  )}
+                </DataTable>
+              </Panel>
             ))}
-          </div>
-        </section>
-      ) : null}
+          </>
+        ) : null}
+      </div>
     </main>
   );
 }
