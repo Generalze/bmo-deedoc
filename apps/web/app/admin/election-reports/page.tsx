@@ -14,6 +14,20 @@ import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  PageHead,
+  Panel,
+  StateView,
+  StatusPill,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarField,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const statusOptions = ["", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"] as const;
@@ -21,6 +35,7 @@ const statusOptions = ["", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"] 
 export default function AdminElectionReportsPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [reports, setReports] = useState<ElectionDayReportItem[]>([]);
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string }>({ tone: "success", message: "" });
@@ -132,145 +147,231 @@ export default function AdminElectionReportsPage() {
       });
     }
   }
-
   if (loading && !user) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading election-day reports...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Election-day reports" />
+        <StateView kind="loading" title="Loading election-day reports…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load election-day reports</h1>
-          <FeedbackBanner tone={feedback.tone} message={feedback.message || "Authentication is required."} />
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Election-day reports" />
+        <StateView
+          kind="error"
+          title="Unable to load election-day reports"
+          detail={feedback.message || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Election-day reporting</p>
-        <h1>Review polling-unit submissions</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Review Polling Unit submissions"
+        lead={`Visible scope: ${describeTerritory(
+          user.adminProfile || {
+            geoPoliticalZoneId: null,
+            stateId: null,
+            senatorialDistrictId: null,
+            federalConstituencyId: null,
+            lgaId: null,
+            wardId: null,
+            stateConstituencyId: null,
+            pollingUnitId: null,
+          },
+        )}`}
+      />
 
       <AdminNav role={user?.role} />
-      <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-      <section className="panel card">
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-          <label className="field">
-            <span>Status</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              {statusOptions.map((option) => (
-                <option key={option || "all"} value={option}>
-                  {option || "All visible statuses"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Report date</span>
-            <input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
-          </label>
-        </div>
-        <div className="action-row" style={{ marginTop: 16 }}>
-          <button className="button" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
-            {loading ? "Loading..." : "Apply filters"}
-          </button>
-        </div>
-      </section>
+      <div className="stack-4">
+        <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Scoped reports</h2>
-            <p className="muted">Review status changes are permission-checked on the backend and limited to your visible territory.</p>
+        <Panel title="Scoped reports" meta={`${formatCount(reports.length)} visible`} flush>
+          <Toolbar>
+            <ToolbarField label="Status">
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                {statusOptions.map((option) => (
+                  <option key={option || "all"} value={option}>
+                    {option ? option.replace(/_/g, " ").toLowerCase() : "All visible statuses"}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Report date">
+              <input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
+            </ToolbarField>
+            <ToolbarEnd>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
+                {loading ? "Loading…" : "Apply"}
+              </button>
+            </ToolbarEnd>
+          </Toolbar>
+
+          <div className="panel-body">
+            <p className="muted-text">
+              Review status changes are permission-checked on the backend and limited to your visible territory.
+            </p>
           </div>
-          <span className="status-pill">{reports.length} visible</span>
-        </div>
 
-        {reports.length === 0 ? (
-          <p className="muted">No election-day reports are visible for the current filter.</p>
-        ) : (
-          <div className="reward-list">
-            {reports.map((report) => (
-              <article key={report.id} className="reward-item">
-                <strong>{report.agentName}</strong>
-                <p>{report.status} | {new Date(report.reportDate).toLocaleDateString()} | {report.territory.pollingUnitId}</p>
-                <p className="muted">
-                  Opening: {report.openingStatus} | Arrival: {new Date(report.arrivalConfirmedAt).toLocaleString()}
-                </p>
-                <p>{report.turnoutObservation}</p>
-                {report.incidentNotes ? <p className="muted">Incident notes: {report.incidentNotes}</p> : null}
-                {report.remarks ? <p className="muted">Remarks: {report.remarks}</p> : null}
-                <div className="reward-list" style={{ marginTop: 10 }}>
-                  {report.voteEntries.map((entry) => (
-                    <article key={`${report.id}-${entry.politicalPartyId}`} className="reward-item">
-                      <strong>{entry.politicalPartyName || entry.politicalPartyId}</strong>
-                      <p>{entry.votes} votes</p>
-                    </article>
-                  ))}
-                </div>
-                <div className="action-row" style={{ marginTop: 12 }}>
-                  <button className="button secondary" type="button" onClick={() => void openAsset(report.arrivalPhotoAssetId)}>
-                    View Arrival Photo
-                  </button>
-                  <button className="button secondary" type="button" onClick={() => void openAsset(report.postCountingPhotoAssetId)}>
-                    View Post-Counting Photo
-                  </button>
-                  <Link href={`/admin/evidence?electionReportId=${encodeURIComponent(report.id)}`}>
-                    Open linked evidence
-                  </Link>
-                  {report.territory.pollingUnitId ? (
-                    <Link href={`/admin/evidence?pollingUnitId=${encodeURIComponent(report.territory.pollingUnitId)}`}>
-                      Open PU dossier
-                    </Link>
-                  ) : null}
-                </div>
-                <label className="field" style={{ marginTop: 12 }}>
-                  <span>Review note</span>
-                  <textarea
-                    rows={3}
-                    value={reviewDrafts[report.id] || ""}
-                    onChange={(event) => setReviewDrafts((current) => ({ ...current, [report.id]: event.target.value }))}
-                  />
-                </label>
-                <div className="action-row">
-                  <button className="button secondary" type="button" onClick={() => setConfirmState({ reportId: report.id, status: "UNDER_REVIEW" })}>
-                    Mark Under Review
-                  </button>
-                  <button className="button" type="button" onClick={() => setConfirmState({ reportId: report.id, status: "APPROVED" })}>
-                    Approve
-                  </button>
-                  <button className="button danger" type="button" onClick={() => setConfirmState({ reportId: report.id, status: "REJECTED" })}>
-                    Reject
-                  </button>
-                </div>
-                {report.reviewNote ? <p className="muted">Current review note: {report.reviewNote}</p> : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          <DataTable
+            head={
+              <tr>
+                <th>Agent</th>
+                <th>Polling Unit</th>
+                <th>Status</th>
+                <th>Opening</th>
+                <th>Report date</th>
+                <th className="actions">Action</th>
+              </tr>
+            }
+          >
+            {reports.length === 0 ? (
+              <EmptyRow colSpan={6}>No election-day reports are visible for the current filter.</EmptyRow>
+            ) : (
+              reports.flatMap((report) => {
+                const open = expandedReportId === report.id;
+                const rows = [
+                  <tr key={report.id} className={open ? "row-open" : undefined}>
+                    <td>
+                      <strong>{report.agentName}</strong>
+                      <div className="muted-text">
+                        Arrived {new Date(report.arrivalConfirmedAt).toLocaleString()}
+                      </div>
+                    </td>
+                    <td className="mono">{report.territory.pollingUnitId}</td>
+                    <td>
+                      <StatusPill status={report.status} />
+                    </td>
+                    <td className="muted-text">{report.openingStatus.replace(/_/g, " ").toLowerCase()}</td>
+                    <td className="muted-text">{new Date(report.reportDate).toLocaleDateString()}</td>
+                    <td className="actions">
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        aria-expanded={open}
+                        onClick={() => setExpandedReportId(open ? null : report.id)}
+                      >
+                        {open ? "Close" : "Review"}
+                      </button>
+                    </td>
+                  </tr>,
+                ];
+
+                if (open) {
+                  rows.push(
+                    <tr key={`${report.id}-detail`} className="row-editor">
+                      <td colSpan={6}>
+                        <div className="stack-3">
+                          <DetailList
+                            rows={[
+                              { label: "Turnout observation", value: report.turnoutObservation },
+                              report.incidentNotes ? { label: "Incident notes", value: report.incidentNotes } : null,
+                              report.remarks ? { label: "Remarks", value: report.remarks } : null,
+                              report.reviewNote ? { label: "Current review note", value: report.reviewNote } : null,
+                            ]}
+                          />
+
+                          <DataTable
+                            caption="Recorded votes by party"
+                            head={
+                              <tr>
+                                <th>Party</th>
+                                <th className="numeric">Votes</th>
+                              </tr>
+                            }
+                          >
+                            {report.voteEntries.length === 0 ? (
+                              <EmptyRow colSpan={2}>No vote entries recorded.</EmptyRow>
+                            ) : (
+                              report.voteEntries.map((entry) => (
+                                <tr key={`${report.id}-${entry.politicalPartyId}`}>
+                                  <td>{entry.politicalPartyName || entry.politicalPartyId}</td>
+                                  <td className="numeric">{formatCount(entry.votes)}</td>
+                                </tr>
+                              ))
+                            )}
+                          </DataTable>
+
+                          <div className="btn-row">
+                            <button className="btn btn-sm" type="button" onClick={() => void openAsset(report.arrivalPhotoAssetId)}>
+                              Arrival photo
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              onClick={() => void openAsset(report.postCountingPhotoAssetId)}
+                            >
+                              Post-counting photo
+                            </button>
+                            <Link className="btn btn-sm" href={`/admin/evidence?electionReportId=${encodeURIComponent(report.id)}`}>
+                              Linked evidence
+                            </Link>
+                            {report.territory.pollingUnitId ? (
+                              <Link
+                                className="btn btn-sm"
+                                href={`/admin/evidence?pollingUnitId=${encodeURIComponent(report.territory.pollingUnitId)}`}
+                              >
+                                PU dossier
+                              </Link>
+                            ) : null}
+                          </div>
+
+                          <Field label="Review note">
+                            <textarea
+                              rows={3}
+                              value={reviewDrafts[report.id] || ""}
+                              onChange={(event) =>
+                                setReviewDrafts((current) => ({ ...current, [report.id]: event.target.value }))
+                              }
+                            />
+                          </Field>
+
+                          <div className="btn-row">
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => setConfirmState({ reportId: report.id, status: "UNDER_REVIEW" })}
+                            >
+                              Mark under review
+                            </button>
+                            <button
+                              className="btn btn-primary"
+                              type="button"
+                              onClick={() => setConfirmState({ reportId: report.id, status: "APPROVED" })}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="btn btn-danger"
+                              type="button"
+                              onClick={() => setConfirmState({ reportId: report.id, status: "REJECTED" })}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>,
+                  );
+                }
+
+                return rows;
+              })
+            )}
+          </DataTable>
+        </Panel>
+      </div>
 
       <ConfirmDialog
         open={Boolean(confirmState)}

@@ -7,6 +7,7 @@ import type { AuthUserProfile, ManagedUserItem } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchManagedUsers } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
+import { Kpi, KpiRow, PageHead, Panel, PanelGrid, StateView, formatCount } from "../../../components/ui";
 import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminManagePage() {
@@ -44,22 +45,27 @@ export default function AdminManagePage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading management workspace...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Management workspace" />
+        <StateView kind="loading" title="Loading management workspace…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load management workspace</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Management workspace" />
+        <StateView
+          kind="error"
+          title="Unable to load management workspace"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
@@ -70,56 +76,77 @@ export default function AdminManagePage() {
   const voterCount = managedUsers.filter((item) => item.role === "VOTER").length;
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">{getScopeTitle(user)}</p>
-        <h1>Management workspace</h1>
-        <p>Authority is scoped to {describeTerritory(user.adminProfile || emptyTerritorySummary())}. Choose a territory first, then move into focused user workflows.</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Management workspace"
+        lead={`${getScopeTitle(user)} · Authority is scoped to ${describeTerritory(
+          user.adminProfile || emptyTerritorySummary(),
+        )}. Choose a territory first, then move into a focused user workflow.`}
+      />
 
       <AdminNav role={user?.role} />
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Admins</h2>
-          <div className="value">{adminCount}</div>
-        </article>
-        <article className="panel card">
-          <h2>Candidates</h2>
-          <div className="value">{candidateCount}</div>
-        </article>
-        <article className="panel card">
-          <h2>Agents</h2>
-          <div className="value">{agentCount}</div>
-        </article>
-        <article className="panel card">
-          <h2>Supporters</h2>
-          <div className="value">{voterCount}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        <KpiRow>
+          <Kpi label="Admins" value={formatCount(adminCount)} />
+          <Kpi label="Candidates" value={formatCount(candidateCount)} />
+          <Kpi label="Agents" value={formatCount(agentCount)} />
+          <Kpi label="Supporters" value={formatCount(voterCount)} />
+        </KpiRow>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Select Territory</h2>
-          <p className="muted">Start every management workflow by narrowing to the territory you control.</p>
-          <Link href="/admin/manage/territory">Open territory selector</Link>
-        </section>
-        <section className="panel card">
-          <h2>Manage Users</h2>
-          <p className="muted">Review scoped user lists, open edit workflows, link party assignments, and control activation safely.</p>
-          <Link href="/admin/manage/users">Open user management</Link>
-        </section>
-        <section className="panel card">
-          <h2>Create User</h2>
-          <p className="muted">Start with territory and role, then create a new admin, candidate, or agent with the right party relationship.</p>
-          <Link href="/admin/manage/create">Open create workflow</Link>
-        </section>
-        <section className="panel card">
-          <h2>Reference Structures</h2>
-          <p className="muted">Super-admin-only zone and party maintenance stays outside day-to-day user operations.</p>
-          <Link href="/admin/reference">Open reference data</Link>
-        </section>
-      </section>
+        <PanelGrid>
+          <Panel
+            title="Select territory"
+            actions={
+              <Link className="btn btn-sm btn-primary" href="/admin/manage/territory">
+                Open
+              </Link>
+            }
+          >
+            <p className="muted-text">Start every management workflow by narrowing to the territory you control.</p>
+          </Panel>
+
+          <Panel
+            title="Manage users"
+            actions={
+              <Link className="btn btn-sm" href="/admin/manage/users">
+                Open
+              </Link>
+            }
+          >
+            <p className="muted-text">
+              Review scoped user lists, open edit workflows, link party assignments and control activation safely.
+            </p>
+          </Panel>
+
+          <Panel
+            title="Create user"
+            actions={
+              <Link className="btn btn-sm" href="/admin/manage/create">
+                Open
+              </Link>
+            }
+          >
+            <p className="muted-text">
+              Start with territory and role, then create an admin, candidate or agent with the right party
+              relationship.
+            </p>
+          </Panel>
+
+          <Panel
+            title="Reference structures"
+            actions={
+              <Link className="btn btn-sm" href="/admin/reference">
+                Open
+              </Link>
+            }
+          >
+            <p className="muted-text">
+              Super-admin-only zone and party maintenance, kept outside day-to-day user operations.
+            </p>
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }
