@@ -19,6 +19,19 @@ import {
 import { AdminNav } from "../../../components/admin-nav";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import {
+  DataTable,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  formatCount,
+} from "../../../components/ui";
 import { clearSession, readSession } from "../../../lib/session";
 
 function formatDependencyCounts(dependencyCounts?: Record<string, number>) {
@@ -247,25 +260,29 @@ export default function AdminReferencePage() {
       setPendingDelete(null);
     }
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading reference data...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Reference data" />
+        <StateView kind="loading" title="Loading reference data…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load reference data</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Reference data" />
+        <StateView
+          kind="error"
+          title="Unable to load reference data"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
@@ -273,249 +290,417 @@ export default function AdminReferencePage() {
   const isSuperAdmin = user.role === "SUPER_ADMIN";
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Reference data</p>
-        <h1>Zones and parties</h1>
-        <p>Manage the reference structures used by candidate creation and public party discovery.</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Zones and parties"
+        lead="The reference structures used by candidate creation and public party discovery."
+      />
 
       <AdminNav role={user?.role} />
 
-      <FeedbackBanner tone="error" message={error} />
-      <FeedbackBanner tone="success" message={message} />
+      <div className="stack-4">
+        <FeedbackBanner tone="error" message={error} />
+        <FeedbackBanner tone="success" message={message} />
 
-      {completeness ? (
-        <>
-          <section className="grid stats" style={{ marginTop: 24 }}>
-            <article className="panel card">
-              <h2>States</h2>
-              <div className="value">{completeness.summary.loadedStates}</div>
-              <p className="muted">Expected in scope: {completeness.summary.expectedStates}</p>
-            </article>
-            <article className="panel card">
-              <h2>LGAs</h2>
-              <div className="value">{completeness.summary.loadedLgas}</div>
-              <p className="muted">Expected in scope: {completeness.summary.expectedLgas}</p>
-            </article>
-            <article className="panel card">
-              <h2>Wards</h2>
-              <div className="value">{completeness.summary.loadedWards}</div>
-              <p className="muted">Wards without polling units: {completeness.summary.wardsWithoutPollingUnits}</p>
-            </article>
-            <article className="panel card">
-              <h2>Polling units</h2>
-              <div className="value">{completeness.summary.loadedPollingUnits}</div>
-              <p className="muted">LGAs without wards: {completeness.summary.lgasWithoutWards}</p>
-            </article>
-          </section>
+        {completeness ? (
+          <>
+            <KpiRow>
+              <Kpi
+                label="States"
+                value={formatCount(completeness.summary.loadedStates)}
+                note={`${formatCount(completeness.summary.expectedStates)} expected in scope`}
+                tone={completeness.summary.loadedStates < completeness.summary.expectedStates ? "warn" : undefined}
+              />
+              <Kpi
+                label="LGAs"
+                value={formatCount(completeness.summary.loadedLgas)}
+                note={`${formatCount(completeness.summary.expectedLgas)} expected in scope`}
+                tone={completeness.summary.loadedLgas < completeness.summary.expectedLgas ? "warn" : undefined}
+              />
+              <Kpi
+                label="Wards"
+                value={formatCount(completeness.summary.loadedWards)}
+                note={`${formatCount(completeness.summary.wardsWithoutPollingUnits)} without Polling Units`}
+                tone={completeness.summary.wardsWithoutPollingUnits > 0 ? "warn" : undefined}
+              />
+              <Kpi
+                label="Polling Units"
+                value={formatCount(completeness.summary.loadedPollingUnits)}
+                note={`${formatCount(completeness.summary.lgasWithoutWards)} LGAs without wards`}
+                tone={completeness.summary.lgasWithoutWards > 0 ? "warn" : undefined}
+              />
+            </KpiRow>
 
-          <section className="panel card" style={{ marginTop: 24 }}>
-            <div className="section-head">
-              <div>
-                <h2>Reference completeness</h2>
-                <p className="muted">
-                  This is a read-only readiness view for national reference coverage. Full polling-unit bootstrap is now a controlled manual ops task.
+            <Panel
+              title="Reference completeness"
+              meta="Read-only readiness view"
+              flush
+            >
+              <div className="panel-body stack-2">
+                <p className="muted-text">
+                  Full Polling Unit bootstrap is a controlled manual operations task, not something this screen runs.
+                </p>
+                <p className="muted-text">
+                  Manual command: <code className="mono">{completeness.manualBootstrapCommand}</code>
                 </p>
               </div>
-              <p className="muted" style={{ maxWidth: 420 }}>
-                Manual command: <code>{completeness.manualBootstrapCommand}</code>
-              </p>
-            </div>
+              <DataTable
+                head={
+                  <tr>
+                    <th>State</th>
+                    <th className="numeric">LGAs</th>
+                    <th className="numeric">Wards</th>
+                    <th className="numeric">Polling Units</th>
+                    <th className="numeric">Missing LGAs</th>
+                    <th className="numeric">LGAs w/o wards</th>
+                    <th className="numeric">Wards w/o PUs</th>
+                    <th>State</th>
+                  </tr>
+                }
+              >
+                {completeness.states.length === 0 ? (
+                  <EmptyRow colSpan={8}>No reference states loaded.</EmptyRow>
+                ) : (
+                  completeness.states.map((state) => (
+                    <tr key={state.stateId}>
+                      <td>{state.stateName}</td>
+                      <td className="numeric">
+                        {formatCount(state.loadedLgas)} / {formatCount(state.expectedLgas)}
+                      </td>
+                      <td className="numeric">{formatCount(state.loadedWards)}</td>
+                      <td className="numeric">{formatCount(state.loadedPollingUnits)}</td>
+                      <td className="numeric">{formatCount(state.missingLgas)}</td>
+                      <td className="numeric">{formatCount(state.lgasWithoutWards)}</td>
+                      <td className="numeric">{formatCount(state.wardsWithoutPollingUnits)}</td>
+                      <td>
+                        <span className={state.isComplete ? "pill pill-executed" : "pill pill-refused"}>
+                          {state.isComplete ? "ready" : "incomplete"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </DataTable>
+            </Panel>
+          </>
+        ) : null}
 
-            <div className="reward-list" style={{ marginTop: 16 }}>
-              {completeness.states.map((state) => (
-                <article key={state.stateId} className="reward-item">
-                  <div className="section-head compact">
-                    <div>
-                      <strong>{state.stateName}</strong>
-                      <p className="muted">
-                        LGAs {state.loadedLgas}/{state.expectedLgas} | Wards {state.loadedWards} | Polling units {state.loadedPollingUnits}
-                      </p>
-                    </div>
-                    <span className={`status-pill ${state.isComplete ? "active" : "inactive"}`}>
-                      {state.isComplete ? "Ready" : "Incomplete"}
-                    </span>
+        <PanelGrid wide>
+          <Panel title="Geo-political zones" meta={`${formatCount(zones.length)} zones`} flush>
+            {isSuperAdmin ? (
+              <div className="panel-body">
+                <form className="stack-3" onSubmit={handleCreateZone}>
+                  <div className="form-grid">
+                    <Field label="Zone ID">
+                      <input value={zoneForm.id} onChange={(event) => setZoneForm({ ...zoneForm, id: event.target.value })} required />
+                    </Field>
+                    <Field label="Zone name">
+                      <input
+                        value={zoneForm.name}
+                        onChange={(event) => setZoneForm({ ...zoneForm, name: event.target.value })}
+                        required
+                      />
+                    </Field>
                   </div>
-                  <p className="muted">
-                    Missing LGAs: {state.missingLgas} | LGAs without wards: {state.lgasWithoutWards} | Wards without polling units: {state.wardsWithoutPollingUnits}
-                  </p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </>
-      ) : null}
-
-      <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Geo-political zones</h2>
-          {isSuperAdmin ? (
-            <form className="form" onSubmit={handleCreateZone}>
-              <label className="field">
-                <span>Zone ID</span>
-                <input value={zoneForm.id} onChange={(event) => setZoneForm({ ...zoneForm, id: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Zone name</span>
-                <input value={zoneForm.name} onChange={(event) => setZoneForm({ ...zoneForm, name: event.target.value })} required />
-              </label>
-              <button className="button" type="submit">Create zone</button>
-            </form>
-          ) : (
-            <p className="muted">Only super admin can create, update, or delete zones.</p>
-          )}
-
-          <div className="reward-list" style={{ marginTop: 16 }}>
-            {zones.map((zone) => (
-              <article key={zone.id} className="reward-item">
-                <strong>{zone.name}</strong>
-                <p className="muted">{zone.id}</p>
-                {editingZoneId === zone.id ? (
-                  <div className="form">
-                    <label className="field">
-                      <span>Rename zone</span>
-                      <input value={zoneEditForm.name} onChange={(event) => setZoneEditForm({ name: event.target.value })} />
-                    </label>
-                    <div className="action-row">
-                      <button className="button" type="button" onClick={() => void handleUpdateZone(zone.id)}>Save</button>
-                      <button className="button secondary" type="button" onClick={() => setEditingZoneId(null)}>Cancel</button>
-                    </div>
-                  </div>
-                ) : isSuperAdmin ? (
-                  <div className="action-row">
-                    <button className="button secondary" type="button" onClick={() => { setEditingZoneId(zone.id); setZoneEditForm({ name: zone.name }); }}>Edit</button>
-                     <button
-                       className="button danger"
-                       type="button"
-                       onClick={() => setPendingDelete({ kind: "zone", id: zone.id, name: zone.name })}
-                     >
-                       Delete
-                     </button>
-                  </div>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel card">
-          <h2>Political parties</h2>
-          {isSuperAdmin ? (
-            <form className="form" onSubmit={handleCreateParty}>
-              <label className="field">
-                <span>Party ID</span>
-                <input value={partyForm.id} onChange={(event) => setPartyForm({ ...partyForm, id: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Code</span>
-                <input value={partyForm.code} onChange={(event) => setPartyForm({ ...partyForm, code: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Name</span>
-                <input value={partyForm.name} onChange={(event) => setPartyForm({ ...partyForm, name: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Logo URL</span>
-                <input value={partyForm.logoUrl} onChange={(event) => setPartyForm({ ...partyForm, logoUrl: event.target.value })} />
-              </label>
-              <label className="field">
-                <span>Description</span>
-                <textarea rows={4} value={partyForm.description} onChange={(event) => setPartyForm({ ...partyForm, description: event.target.value })} />
-              </label>
-              <label className="field">
-                <span>Official website</span>
-                <input value={partyForm.officialWebsite} onChange={(event) => setPartyForm({ ...partyForm, officialWebsite: event.target.value })} />
-              </label>
-              <label className="checkbox-field">
-                <input type="checkbox" checked={partyForm.isApprovedByInec} onChange={(event) => setPartyForm({ ...partyForm, isApprovedByInec: event.target.checked })} />
-                <span>Mark as INEC approved</span>
-              </label>
-              <label className="field">
-                <span>INEC source URL</span>
-                <input value={partyForm.inecSourceUrl} onChange={(event) => setPartyForm({ ...partyForm, inecSourceUrl: event.target.value })} />
-              </label>
-              <button className="button" type="submit">Create party</button>
-            </form>
-          ) : (
-            <p className="muted">Only super admin can create, update, or delete parties.</p>
-          )}
-
-          <div className="reward-list" style={{ marginTop: 16 }}>
-            {parties.map((party) => (
-              <article key={party.id} className="reward-item">
-                <strong>{party.code} - {party.name}</strong>
-                <p className="muted">{party.isApprovedByInec ? "INEC approved" : "Custom / local record"}</p>
-                {party.description ? <p>{party.description}</p> : null}
-                {editingPartyId === party.id ? (
-                  <div className="form">
-                    <label className="field">
-                      <span>Code</span>
-                      <input value={partyEditForm.code} onChange={(event) => setPartyEditForm({ ...partyEditForm, code: event.target.value })} />
-                    </label>
-                    <label className="field">
-                      <span>Name</span>
-                      <input value={partyEditForm.name} onChange={(event) => setPartyEditForm({ ...partyEditForm, name: event.target.value })} />
-                    </label>
-                    <label className="field">
-                      <span>Logo URL</span>
-                      <input value={partyEditForm.logoUrl} onChange={(event) => setPartyEditForm({ ...partyEditForm, logoUrl: event.target.value })} />
-                    </label>
-                    <label className="field">
-                      <span>Description</span>
-                      <textarea rows={3} value={partyEditForm.description} onChange={(event) => setPartyEditForm({ ...partyEditForm, description: event.target.value })} />
-                    </label>
-                    <label className="field">
-                      <span>Official website</span>
-                      <input value={partyEditForm.officialWebsite} onChange={(event) => setPartyEditForm({ ...partyEditForm, officialWebsite: event.target.value })} />
-                    </label>
-                    <label className="checkbox-field">
-                      <input type="checkbox" checked={partyEditForm.isApprovedByInec} onChange={(event) => setPartyEditForm({ ...partyEditForm, isApprovedByInec: event.target.checked })} />
-                      <span>INEC approved</span>
-                    </label>
-                    <label className="field">
-                      <span>INEC source URL</span>
-                      <input value={partyEditForm.inecSourceUrl} onChange={(event) => setPartyEditForm({ ...partyEditForm, inecSourceUrl: event.target.value })} />
-                    </label>
-                    <div className="action-row">
-                      <button className="button" type="button" onClick={() => void handleUpdateParty(party.id)}>Save</button>
-                      <button className="button secondary" type="button" onClick={() => setEditingPartyId(null)}>Cancel</button>
-                    </div>
-                  </div>
-                ) : isSuperAdmin ? (
-                  <div className="action-row">
-                    <button
-                      className="button secondary"
-                      type="button"
-                      onClick={() => {
-                        setEditingPartyId(party.id);
-                        setPartyEditForm({
-                          code: party.code,
-                          name: party.name,
-                          logoUrl: party.logoUrl || "",
-                          description: party.description || "",
-                          officialWebsite: party.officialWebsite || "",
-                          isApprovedByInec: party.isApprovedByInec,
-                          inecSourceUrl: party.inecSourceUrl || "",
-                        });
-                      }}
-                    >
-                      Edit
+                  <div className="btn-row">
+                    <button className="btn btn-primary" type="submit">
+                      Create zone
                     </button>
-                     <button
-                       className="button danger"
-                       type="button"
-                       onClick={() => setPendingDelete({ kind: "party", id: party.id, name: party.name })}
-                     >
-                       Delete
-                     </button>
                   </div>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      </section>
+                </form>
+              </div>
+            ) : (
+              <div className="panel-body">
+                <Notice tone="refused" title="Read only">
+                  <span>Only the super admin can create, update or delete zones.</span>
+                </Notice>
+              </div>
+            )}
+
+            <DataTable
+              head={
+                <tr>
+                  <th>Zone</th>
+                  <th>ID</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {zones.length === 0 ? (
+                <EmptyRow colSpan={3}>No zones defined.</EmptyRow>
+              ) : (
+                zones.flatMap((zone) => {
+                  const editing = editingZoneId === zone.id;
+                  const rows = [
+                    <tr key={zone.id} className={editing ? "row-open" : undefined}>
+                      <td>{zone.name}</td>
+                      <td className="mono">{zone.id}</td>
+                      <td className="actions">
+                        {isSuperAdmin && !editing ? (
+                          <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              onClick={() => {
+                                setEditingZoneId(zone.id);
+                                setZoneEditForm({ name: zone.name });
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm btn-danger"
+                              type="button"
+                              onClick={() => setPendingDelete({ kind: "zone", id: zone.id, name: zone.name })}
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="muted-text">—</span>
+                        )}
+                      </td>
+                    </tr>,
+                  ];
+
+                  if (editing) {
+                    rows.push(
+                      <tr key={`${zone.id}-edit`} className="row-editor">
+                        <td colSpan={3}>
+                          <div className="stack-3">
+                            <Field label="Rename zone">
+                              <input value={zoneEditForm.name} onChange={(event) => setZoneEditForm({ name: event.target.value })} />
+                            </Field>
+                            <div className="btn-row">
+                              <button className="btn btn-primary" type="button" onClick={() => void handleUpdateZone(zone.id)}>
+                                Save
+                              </button>
+                              <button className="btn" type="button" onClick={() => setEditingZoneId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>,
+                    );
+                  }
+
+                  return rows;
+                })
+              )}
+            </DataTable>
+          </Panel>
+
+          <Panel title="Political parties" meta={`${formatCount(parties.length)} parties`} flush>
+            {isSuperAdmin ? (
+              <div className="panel-body">
+                <form className="stack-3" onSubmit={handleCreateParty}>
+                  <div className="form-grid">
+                    <Field label="Party ID">
+                      <input value={partyForm.id} onChange={(event) => setPartyForm({ ...partyForm, id: event.target.value })} required />
+                    </Field>
+                    <Field label="Code">
+                      <input
+                        value={partyForm.code}
+                        onChange={(event) => setPartyForm({ ...partyForm, code: event.target.value })}
+                        required
+                      />
+                    </Field>
+                    <Field label="Name">
+                      <input
+                        value={partyForm.name}
+                        onChange={(event) => setPartyForm({ ...partyForm, name: event.target.value })}
+                        required
+                      />
+                    </Field>
+                    <Field label="Logo URL">
+                      <input value={partyForm.logoUrl} onChange={(event) => setPartyForm({ ...partyForm, logoUrl: event.target.value })} />
+                    </Field>
+                    <Field label="Official website">
+                      <input
+                        value={partyForm.officialWebsite}
+                        onChange={(event) => setPartyForm({ ...partyForm, officialWebsite: event.target.value })}
+                      />
+                    </Field>
+                    <Field label="INEC source URL" hint="Where the INEC listing was read from.">
+                      <input
+                        value={partyForm.inecSourceUrl}
+                        onChange={(event) => setPartyForm({ ...partyForm, inecSourceUrl: event.target.value })}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Description">
+                    <textarea
+                      rows={3}
+                      value={partyForm.description}
+                      onChange={(event) => setPartyForm({ ...partyForm, description: event.target.value })}
+                    />
+                  </Field>
+                  <label className="consent">
+                    <input
+                      type="checkbox"
+                      checked={partyForm.isApprovedByInec}
+                      onChange={(event) => setPartyForm({ ...partyForm, isApprovedByInec: event.target.checked })}
+                    />
+                    <span>Mark as INEC approved</span>
+                  </label>
+                  <div className="btn-row">
+                    <button className="btn btn-primary" type="submit">
+                      Create party
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <div className="panel-body">
+                <Notice tone="refused" title="Read only">
+                  <span>Only the super admin can create, update or delete parties.</span>
+                </Notice>
+              </div>
+            )}
+
+            <DataTable
+              head={
+                <tr>
+                  <th>Party</th>
+                  <th>Listing</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {parties.length === 0 ? (
+                <EmptyRow colSpan={3}>No parties defined.</EmptyRow>
+              ) : (
+                parties.flatMap((party) => {
+                  const editing = editingPartyId === party.id;
+                  const rows = [
+                    <tr key={party.id} className={editing ? "row-open" : undefined}>
+                      <td>
+                        <strong>
+                          {party.code} — {party.name}
+                        </strong>
+                        {party.description ? <div className="muted-text">{party.description}</div> : null}
+                      </td>
+                      <td>
+                        <span className={party.isApprovedByInec ? "pill pill-executed" : "pill pill-stale"}>
+                          {party.isApprovedByInec ? "INEC approved" : "custom record"}
+                        </span>
+                      </td>
+                      <td className="actions">
+                        {isSuperAdmin && !editing ? (
+                          <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              onClick={() => {
+                                setEditingPartyId(party.id);
+                                setPartyEditForm({
+                                  code: party.code,
+                                  name: party.name,
+                                  logoUrl: party.logoUrl || "",
+                                  description: party.description || "",
+                                  officialWebsite: party.officialWebsite || "",
+                                  isApprovedByInec: party.isApprovedByInec,
+                                  inecSourceUrl: party.inecSourceUrl || "",
+                                });
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm btn-danger"
+                              type="button"
+                              onClick={() => setPendingDelete({ kind: "party", id: party.id, name: party.name })}
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="muted-text">—</span>
+                        )}
+                      </td>
+                    </tr>,
+                  ];
+
+                  if (editing) {
+                    rows.push(
+                      <tr key={`${party.id}-edit`} className="row-editor">
+                        <td colSpan={3}>
+                          <div className="stack-3">
+                            <div className="form-grid">
+                              <Field label="Code">
+                                <input
+                                  value={partyEditForm.code}
+                                  onChange={(event) => setPartyEditForm({ ...partyEditForm, code: event.target.value })}
+                                />
+                              </Field>
+                              <Field label="Name">
+                                <input
+                                  value={partyEditForm.name}
+                                  onChange={(event) => setPartyEditForm({ ...partyEditForm, name: event.target.value })}
+                                />
+                              </Field>
+                              <Field label="Logo URL">
+                                <input
+                                  value={partyEditForm.logoUrl}
+                                  onChange={(event) => setPartyEditForm({ ...partyEditForm, logoUrl: event.target.value })}
+                                />
+                              </Field>
+                              <Field label="Official website">
+                                <input
+                                  value={partyEditForm.officialWebsite}
+                                  onChange={(event) =>
+                                    setPartyEditForm({ ...partyEditForm, officialWebsite: event.target.value })
+                                  }
+                                />
+                              </Field>
+                              <Field label="INEC source URL">
+                                <input
+                                  value={partyEditForm.inecSourceUrl}
+                                  onChange={(event) =>
+                                    setPartyEditForm({ ...partyEditForm, inecSourceUrl: event.target.value })
+                                  }
+                                />
+                              </Field>
+                            </div>
+                            <Field label="Description">
+                              <textarea
+                                rows={3}
+                                value={partyEditForm.description}
+                                onChange={(event) => setPartyEditForm({ ...partyEditForm, description: event.target.value })}
+                              />
+                            </Field>
+                            <label className="consent">
+                              <input
+                                type="checkbox"
+                                checked={partyEditForm.isApprovedByInec}
+                                onChange={(event) =>
+                                  setPartyEditForm({ ...partyEditForm, isApprovedByInec: event.target.checked })
+                                }
+                              />
+                              <span>INEC approved</span>
+                            </label>
+                            <div className="btn-row">
+                              <button className="btn btn-primary" type="button" onClick={() => void handleUpdateParty(party.id)}>
+                                Save
+                              </button>
+                              <button className="btn" type="button" onClick={() => setEditingPartyId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>,
+                    );
+                  }
+
+                  return rows;
+                })
+              )}
+            </DataTable>
+          </Panel>
+        </PanelGrid>
+      </div>
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
