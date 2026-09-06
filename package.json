@@ -30,7 +30,7 @@
     "bootstrap:check": "npm run bootstrap:check --workspace @pics-nigeria/database",
     "verify:migrations": "node scripts/verify-migration-integrity.mjs",
     "verify:docs": "node scripts/verify-documentation.mjs",
-    "verify:repository": "npm run verify:migrations && npm run verify:docs && npm run verify:deployment && npm run verify:money-out && npm run verify:ancestry",
+    "verify:repository": "npm run verify:migrations && npm run verify:docs && npm run verify:deployment && npm run verify:money-out && npm run verify:ancestry && npm run verify:turn",
     "verify:reference:ogun": "npm run verify:reference:ogun --workspace @pics-nigeria/database",
     "verify:reference:ogun:allow-incomplete": "npm run verify:reference:ogun:allow-incomplete --workspace @pics-nigeria/database",
     "report:reference:ogun": "npm run report:reference:ogun --workspace @pics-nigeria/database",
@@ -51,7 +51,8 @@
     "rehearse:production": "npm run rehearse:migration && npm run verify:backup-restore && npm run verify:load-recovery",
     "migrate:legacy-balances": "npm run migrate:legacy-balances --workspace @pics-nigeria/database --",
     "backfill:member-ancestry": "npm run backfill:member-ancestry --workspace @pics-nigeria/database --",
-    "verify:ancestry": "node scripts/verify-ancestry-authority.mjs"
+    "verify:ancestry": "node scripts/verify-ancestry-authority.mjs",
+    "verify:turn": "node scripts/verify-turn-configuration.mjs"
   },
   "devDependencies": {
     "concurrently": "9.2.4",
