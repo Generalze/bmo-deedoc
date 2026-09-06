@@ -6,6 +6,19 @@ import type { AuthUserProfile, CoverageInsights } from "@pics-nigeria/shared";
 import { ApiError, fetchAdminCoverageInsights, fetchCurrentUser, updateStateAgentTarget } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  formatCount,
+} from "../../../../components/ui";
 import { readSession } from "../../../../lib/session";
 
 export default function AdminCoveragePage() {
@@ -125,349 +138,410 @@ export default function AdminCoveragePage() {
       setSavingStateId("");
     }
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading coverage insights...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Territory coverage" />
+        <StateView kind="loading" title="Loading coverage insights…" />
       </main>
     );
   }
 
   if (!user || !insights) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load coverage insights</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Territory coverage" />
+        <StateView
+          kind="error"
+          title="Unable to load coverage insights"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Field intelligence</p>
-        <h1>Territory coverage</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-        <p className="muted">Coverage totals are restricted to your current authority. State and LGA inventory is authoritative. Ward, polling-unit, and staffing totals remain provisional until the full polling-unit reference dataset is loaded for this scope.</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Territory coverage"
+        lead={`Visible scope: ${describeTerritory(
+          user.adminProfile || {
+            geoPoliticalZoneId: null,
+            stateId: null,
+            senatorialDistrictId: null,
+            federalConstituencyId: null,
+            lgaId: null,
+            wardId: null,
+            stateConstituencyId: null,
+            pollingUnitId: null,
+          },
+        )}`}
+      />
 
       <AdminNav role={user?.role} />
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
-      {insights.scopeWarning ? <p className="muted">{insights.scopeWarning}</p> : null}
-      {insights.referenceData.inventoryWarning ? <p className="error">{insights.referenceData.inventoryWarning}</p> : null}
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>States in scope</h2>
-          <div className="value">{insights.referenceData.authoritativeStates}</div>
-        </article>
-        <article className="panel card">
-          <h2>LGAs in scope</h2>
-          <div className="value">{insights.referenceData.authoritativeLgas}</div>
-        </article>
-        <article className="panel card">
-          <h2>{inventoryComplete ? "Wards in scope" : "Loaded wards in scope"}</h2>
-          <div className="value">{insights.referenceData.loadedWards}</div>
-        </article>
-        <article className="panel card">
-          <h2>{inventoryComplete ? "Polling units in scope" : "Loaded polling units in scope"}</h2>
-          <div className="value">{insights.summary.totalPollingUnitsInScope}</div>
-        </article>
-        <article className="panel card">
-          <h2>Wards with coverage pressure</h2>
-          <div className="value">{wardsNeedingAttention}</div>
-        </article>
-        <article className="panel card">
-          <h2>Weak coverage</h2>
-          <div className="value">{insights.summary.weakCoveragePollingUnits}</div>
-        </article>
-        <article className="panel card">
-          <h2>No assigned agents</h2>
-          <div className="value">{insights.summary.pollingUnitsWithoutAssignedAgents}</div>
-        </article>
-        <article className="panel card">
-          <h2>No recent activity</h2>
-          <div className="value">{insights.summary.pollingUnitsWithoutActivity}</div>
-        </article>
-        <article className="panel card">
-          <h2>Open incident pressure</h2>
-          <div className="value">{insights.summary.pollingUnitsWithIncidents}</div>
-        </article>
-        <article className="panel card">
-          <h2>Agents missing polling unit</h2>
-          <div className="value">{insights.summary.agentsWithoutPollingUnitAssignments}</div>
-        </article>
-        <article className="panel card">
-          <h2>Loaded wards without polling units</h2>
-          <div className="value">{insights.referenceData.loadedWardsWithoutPollingUnits}</div>
-        </article>
-        <article className="panel card">
-          <h2>Assigned agents</h2>
-          <div className="value">{insights.summary.assignedAgentsInScope}</div>
-        </article>
-        <article className="panel card">
-          <h2>{inventoryComplete ? "Target agents" : "Loaded target agents"}</h2>
-          <div className="value">{insights.summary.targetAgentsInScope}</div>
-        </article>
-        <article className="panel card">
-          <h2>{inventoryComplete ? "Agents left to target" : "Loaded agents left"}</h2>
-          <div className="value">{insights.summary.remainingAgentsToTarget}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
+        {message ? <Notice tone="ok" title={message} /> : null}
+        {insights.referenceData.inventoryWarning ? (
+          <Notice tone="legacy" title="Reference inventory is incomplete">
+            <span>{insights.referenceData.inventoryWarning}</span>
+          </Notice>
+        ) : null}
+        {insights.scopeWarning ? (
+          <Notice tone="legacy" title="Scope note">
+            <span>{insights.scopeWarning}</span>
+          </Notice>
+        ) : null}
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Territory inventory</h2>
-              <p className="muted">These are the reference counts the platform uses for staffing and coverage decisions in your visible territory. State and LGA totals are authoritative. Ward and polling-unit totals only become authoritative after the full reference dataset is loaded.</p>
-            </div>
-            <span className="status-pill">{inventoryComplete ? "Authoritative" : "Provisional"}</span>
-          </div>
-          <div className="reward-list">
-            <article className="reward-item">
-              <strong>States in scope</strong>
-              <p className="muted">{insights.referenceData.authoritativeStates}</p>
-            </article>
-            <article className="reward-item">
-              <strong>LGAs in scope</strong>
-              <p className="muted">{insights.referenceData.authoritativeLgas}</p>
-            </article>
-            <article className="reward-item">
-              <strong>{inventoryComplete ? "Wards in scope" : "Loaded wards in scope"}</strong>
-              <p className="muted">{insights.referenceData.loadedWards}</p>
-            </article>
-            <article className="reward-item">
-              <strong>{inventoryComplete ? "Polling units in scope" : "Loaded polling units in scope"}</strong>
-              <p className="muted">{insights.referenceData.loadedPollingUnits}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Wards without polling units</strong>
-              <p className="muted">{insights.referenceData.loadedWardsWithoutPollingUnits}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Synthetic bootstrap LGAs</strong>
-              <p className="muted">{insights.referenceData.syntheticBootstrapLgas}</p>
-            </article>
-          </div>
-        </section>
+        {/*
+          These were fourteen equally weighted tiles, six of which the Territory
+          inventory panel below then repeated verbatim. What an operator acts on
+          is the gap between what is staffed and what is not, so only the gaps
+          are primary; the reference counts stay in the inventory panel that
+          already carried them.
+        */}
+        <KpiRow>
+          <Kpi
+            label={inventoryComplete ? "Polling Units in scope" : "Loaded Polling Units"}
+            value={formatCount(insights.summary.totalPollingUnitsInScope)}
+            note={inventoryComplete ? "Authoritative inventory" : "Provisional until the full reference set loads"}
+          />
+          <Kpi
+            label="Without assigned agents"
+            value={formatCount(insights.summary.pollingUnitsWithoutAssignedAgents)}
+            note="Staff these first"
+            tone={insights.summary.pollingUnitsWithoutAssignedAgents > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Without recent activity"
+            value={formatCount(insights.summary.pollingUnitsWithoutActivity)}
+            note="No field signal in the current window"
+            tone={insights.summary.pollingUnitsWithoutActivity > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Open incident pressure"
+            value={formatCount(insights.summary.pollingUnitsWithIncidents)}
+            tone={insights.summary.pollingUnitsWithIncidents > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Agents left to target"
+            value={formatCount(insights.summary.remainingAgentsToTarget)}
+            note={`${formatCount(insights.summary.assignedAgentsInScope)} assigned of ${formatCount(insights.summary.targetAgentsInScope)} target`}
+            tone={insights.summary.remainingAgentsToTarget > 0 ? "accent" : undefined}
+          />
+        </KpiRow>
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>State staffing targets</h2>
-              <p className="muted">Target staffing is calculated from polling units currently loaded inside your visible territory. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
+        <PanelGrid>
+          <Panel
+            title="Territory inventory"
+            meta={inventoryComplete ? "Authoritative" : "Provisional"}
+          >
+            <div className="stack-3">
+              <p className="muted-text">
+                The reference counts the platform uses for staffing decisions. State and LGA totals are authoritative.
+                Ward and Polling Unit totals become authoritative only once the full reference dataset is loaded.
+              </p>
+              <DetailList
+                rows={[
+                  { label: "States", value: formatCount(insights.referenceData.authoritativeStates) },
+                  { label: "LGAs", value: formatCount(insights.referenceData.authoritativeLgas) },
+                  {
+                    label: inventoryComplete ? "Wards" : "Loaded wards",
+                    value: formatCount(insights.referenceData.loadedWards),
+                  },
+                  {
+                    label: inventoryComplete ? "Polling Units" : "Loaded Polling Units",
+                    value: formatCount(insights.referenceData.loadedPollingUnits),
+                  },
+                  {
+                    label: "Wards without Polling Units",
+                    value: formatCount(insights.referenceData.loadedWardsWithoutPollingUnits),
+                  },
+                  {
+                    label: "Synthetic bootstrap LGAs",
+                    value: formatCount(insights.referenceData.syntheticBootstrapLgas),
+                  },
+                  { label: "Wards under pressure", value: formatCount(wardsNeedingAttention) },
+                  { label: "Weak coverage units", value: formatCount(insights.summary.weakCoveragePollingUnits) },
+                  {
+                    label: "Agents with no Polling Unit",
+                    value: formatCount(insights.summary.agentsWithoutPollingUnitAssignments),
+                  },
+                ]}
+              />
             </div>
-            <span className="status-pill">{inventoryComplete ? `${insights.stateTargets.length} states` : "Loaded reference only"}</span>
-          </div>
-          {insights.stateTargets.length === 0 ? (
-            <p className="muted">No state staffing data is available in the current scope.</p>
-          ) : (
-            <div className="reward-list">
-              {insights.stateTargets.map((stateTarget) => (
-                <article key={stateTarget.stateId} className="reward-item">
-                  <strong>{stateTarget.stateName}</strong>
-                  <p className="muted">
-                    Polling units in scope: {stateTarget.pollingUnitCount} | Current visible agents: {stateTarget.assignedAgentCount} | Target agents: {stateTarget.targetAgentCount}
-                  </p>
-                  <p className="muted">Agents left to target: {stateTarget.remainingAgentCount}</p>
-                  {canSetTargets && canEditStateTarget(stateTarget.stateId) ? (
-                    <div className="action-row" style={{ marginTop: 12 }}>
-                      <input
-                        type="number"
-                        min={1}
-                        value={stateTargetInputs[stateTarget.stateId] || ""}
-                        onChange={(event) => setStateTargetInputs((current) => ({ ...current, [stateTarget.stateId]: event.target.value }))}
-                        style={{ maxWidth: 120 }}
-                      />
-                      <button
-                        className="button secondary"
-                        type="button"
-                        disabled={savingStateId === stateTarget.stateId}
-                        onClick={() => void handleStateTargetSave(stateTarget.stateId)}
-                      >
-                        {savingStateId === stateTarget.stateId ? "Saving..." : "Set agents per PU"}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="muted">Configured target: {stateTarget.targetAgentsPerPollingUnit} agent(s) per polling unit.</p>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+          </Panel>
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Agent assignment integrity</h2>
-              <p className="muted">Agents should not be onboarded without a polling unit. This queue highlights any assignment gaps in scope.</p>
+          <Panel
+            title="State staffing targets"
+            meta={inventoryComplete ? `${formatCount(insights.stateTargets.length)} states` : "Loaded reference only"}
+            flush
+          >
+            <div className="panel-body">
+              <p className="muted-text">
+                Targets are calculated from Polling Units currently loaded inside your visible territory. With no state
+                target set, the platform defaults to one agent per Polling Unit.
+              </p>
             </div>
-            <span className="status-pill">{agentAssignmentGaps.length} agents</span>
-          </div>
-          {agentAssignmentGaps.length === 0 ? (
-            <p className="muted">All visible agents are currently linked to polling units.</p>
-          ) : (
-            <div className="reward-list">
-              {agentAssignmentGaps.map((agent) => (
-                <article key={agent.userId} className="reward-item">
-                  <strong>{agent.name}</strong>
-                  <p>{agent.email}</p>
-                  <p className="muted">
-                    State: {agent.territory.stateId || "Not set"} | LGA: {agent.territory.lgaId || "Not set"} | Ward: {agent.territory.wardId || "Not set"}
-                  </p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </section>
+            <DataTable
+              head={
+                <tr>
+                  <th>State</th>
+                  <th className="numeric">Polling Units</th>
+                  <th className="numeric">Agents</th>
+                  <th className="numeric">Target</th>
+                  <th className="numeric">Left</th>
+                  <th className="actions">Agents per PU</th>
+                </tr>
+              }
+            >
+              {insights.stateTargets.length === 0 ? (
+                <EmptyRow colSpan={6}>No state staffing data in the current scope.</EmptyRow>
+              ) : (
+                insights.stateTargets.map((stateTarget) => (
+                  <tr key={stateTarget.stateId}>
+                    <td>{stateTarget.stateName}</td>
+                    <td className="numeric">{formatCount(stateTarget.pollingUnitCount)}</td>
+                    <td className="numeric">{formatCount(stateTarget.assignedAgentCount)}</td>
+                    <td className="numeric">{formatCount(stateTarget.targetAgentCount)}</td>
+                    <td className="numeric">{formatCount(stateTarget.remainingAgentCount)}</td>
+                    <td className="actions">
+                      {canSetTargets && canEditStateTarget(stateTarget.stateId) ? (
+                        <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                          <label className="sr-only" htmlFor={`target-${stateTarget.stateId}`}>
+                            Agents per Polling Unit for {stateTarget.stateName}
+                          </label>
+                          <input
+                            id={`target-${stateTarget.stateId}`}
+                            type="number"
+                            min={1}
+                            style={{ maxWidth: "5rem" }}
+                            value={stateTargetInputs[stateTarget.stateId] || ""}
+                            onChange={(event) =>
+                              setStateTargetInputs((current) => ({ ...current, [stateTarget.stateId]: event.target.value }))
+                            }
+                          />
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            disabled={savingStateId === stateTarget.stateId}
+                            onClick={() => void handleStateTargetSave(stateTarget.stateId)}
+                          >
+                            {savingStateId === stateTarget.stateId ? "Saving…" : "Set"}
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="muted-text">{stateTarget.targetAgentsPerPollingUnit} per unit</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+        </PanelGrid>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Priority wards</h2>
-              <p className="muted">Wards are sorted by missing agents, missing recent activity, and open incident pressure inside your current territory.</p>
+        <PanelGrid wide>
+          <Panel title="Priority wards" meta={`${formatCount(insights.wards.length)} wards`} flush>
+            <div className="panel-body">
+              <p className="muted-text">
+                Sorted by missing agents, missing recent activity and open incident pressure inside your territory.
+              </p>
             </div>
-            <span className="status-pill">{insights.wards.length} wards</span>
-          </div>
-          {insights.wards.length === 0 ? (
-            <p className="muted">No ward coverage data is available in the current scope.</p>
-          ) : (
-            <div className="reward-list">
-              {insights.wards.slice(0, 12).map((ward) => (
-                <article key={ward.wardId} className="reward-item">
-                  <strong>{ward.wardName}</strong>
-                  <p>{ward.lgaName}</p>
-                  <p className="muted">
-                    {ward.pollingUnitCount} polling units | {ward.assignedAgentCount} current agents | {ward.targetAgentCount} target agents
-                  </p>
-                  <p className="muted">{ward.remainingAgentCount} left to target | {ward.openIncidentCount} open incidents</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+            <DataTable
+              head={
+                <tr>
+                  <th>Ward</th>
+                  <th>LGA</th>
+                  <th className="numeric">Units</th>
+                  <th className="numeric">Agents</th>
+                  <th className="numeric">Target</th>
+                  <th className="numeric">Left</th>
+                  <th className="numeric">Incidents</th>
+                </tr>
+              }
+            >
+              {insights.wards.length === 0 ? (
+                <EmptyRow colSpan={7}>No ward coverage data in the current scope.</EmptyRow>
+              ) : (
+                insights.wards.slice(0, 20).map((ward) => (
+                  <tr key={ward.wardId}>
+                    <td>{ward.wardName}</td>
+                    <td className="muted-text">{ward.lgaName}</td>
+                    <td className="numeric">{formatCount(ward.pollingUnitCount)}</td>
+                    <td className="numeric">{formatCount(ward.assignedAgentCount)}</td>
+                    <td className="numeric">{formatCount(ward.targetAgentCount)}</td>
+                    <td className="numeric">{formatCount(ward.remainingAgentCount)}</td>
+                    <td className="numeric">{formatCount(ward.openIncidentCount)}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Polling units needing attention</h2>
-              <p className="muted">These units currently have no assigned agents, no recent activity, or active incident pressure.</p>
-            </div>
-            <span className="status-pill">
-              {insights.pollingUnits.filter((unit) => unit.requiresAttention).length} flagged
-            </span>
-          </div>
-          {insights.pollingUnits.length === 0 ? (
-            <p className="muted">No polling-unit coverage data is available in the current scope.</p>
-          ) : (
-            <div className="reward-list">
-              {insights.pollingUnits.filter((unit) => unit.requiresAttention).slice(0, 16).map((unit) => (
-                <article key={unit.pollingUnitId} className="reward-item">
-                  <strong>{unit.pollingUnitName}</strong>
-                  <p>{unit.wardName} | {unit.lgaName} | {unit.stateName}</p>
-                  <p className="muted">
-                    Agents: {unit.assignedAgentCount} of {unit.targetAgentCount} target | Recent signals: {unit.recentActivityCount} | Open incidents: {unit.openIncidentCount}
-                  </p>
-                  <p className="muted">
-                    {unit.remainingAgentCount} left to target | {unit.hasRecentActivity ? "Recent activity present" : "No recent activity"}
-                  </p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </section>
+          <Panel
+            title="Polling Units needing attention"
+            meta={`${formatCount(insights.pollingUnits.filter((unit) => unit.requiresAttention).length)} flagged`}
+            flush
+          >
+            <DataTable
+              head={
+                <tr>
+                  <th>Polling Unit</th>
+                  <th>Ward / LGA</th>
+                  <th className="numeric">Agents</th>
+                  <th className="numeric">Signals</th>
+                  <th className="numeric">Incidents</th>
+                </tr>
+              }
+            >
+              {insights.pollingUnits.filter((unit) => unit.requiresAttention).length === 0 ? (
+                <EmptyRow colSpan={5}>No Polling Unit currently needs attention in this scope.</EmptyRow>
+              ) : (
+                insights.pollingUnits
+                  .filter((unit) => unit.requiresAttention)
+                  .slice(0, 20)
+                  .map((unit) => (
+                    <tr key={unit.pollingUnitId}>
+                      <td>
+                        {unit.pollingUnitName}
+                        {!unit.hasRecentActivity ? (
+                          <div>
+                            <span className="pill pill-refused">no recent activity</span>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="muted-text">
+                        {unit.wardName} · {unit.lgaName}
+                      </td>
+                      <td className="numeric">
+                        {formatCount(unit.assignedAgentCount)} / {formatCount(unit.targetAgentCount)}
+                      </td>
+                      <td className="numeric">{formatCount(unit.recentActivityCount)}</td>
+                      <td className="numeric">{formatCount(unit.openIncidentCount)}</td>
+                    </tr>
+                  ))
+              )}
+            </DataTable>
+          </Panel>
+        </PanelGrid>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Agent assignment gaps</h2>
-              <p className="muted">Use this queue to identify wards and polling units that need agent coverage first.</p>
+        <PanelGrid>
+          <Panel title="Agent assignment integrity" meta={`${formatCount(agentAssignmentGaps.length)} agents`} flush>
+            <div className="panel-body">
+              <p className="muted-text">An agent should not be onboarded without a Polling Unit.</p>
             </div>
-            <span className="status-pill">{unitsWithoutAgents.length} units</span>
-          </div>
-          {unitsWithoutAgents.length === 0 ? (
-            <p className="muted">All visible polling units currently have assigned agents.</p>
-          ) : (
-            <div className="reward-list">
-              {wardsWithNoAgents.length ? wardsWithNoAgents.map((ward) => (
-                <article key={`gap-${ward.wardId}`} className="reward-item">
-                  <strong>{ward.wardName}</strong>
-                  <p>{ward.lgaName}</p>
-                  <p className="muted">{ward.pollingUnitsWithoutAgents} polling units without assigned agents</p>
-                </article>
-              )) : null}
-            </div>
-          )}
-        </section>
+            <DataTable
+              head={
+                <tr>
+                  <th>Agent</th>
+                  <th>State</th>
+                  <th>LGA</th>
+                  <th>Ward</th>
+                </tr>
+              }
+            >
+              {agentAssignmentGaps.length === 0 ? (
+                <EmptyRow colSpan={4}>All visible agents are linked to a Polling Unit.</EmptyRow>
+              ) : (
+                agentAssignmentGaps.map((agent) => (
+                  <tr key={agent.userId}>
+                    <td>
+                      <strong>{agent.name}</strong>
+                      <div className="muted-text">{agent.email}</div>
+                    </td>
+                    <td className="muted-text">{agent.territory.stateId || "Not set"}</td>
+                    <td className="muted-text">{agent.territory.lgaId || "Not set"}</td>
+                    <td className="muted-text">{agent.territory.wardId || "Not set"}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Activity follow-up</h2>
-              <p className="muted">These areas have visible polling units without recent field signals in the current window.</p>
-            </div>
-            <span className="status-pill">{unitsWithoutRecentActivity.length} units</span>
-          </div>
-          {unitsWithoutRecentActivity.length === 0 ? (
-            <p className="muted">All visible polling units have recent field activity.</p>
-          ) : (
-            <div className="reward-list">
-              {wardsWithNoRecentActivity.map((ward) => (
-                <article key={`activity-${ward.wardId}`} className="reward-item">
-                  <strong>{ward.wardName}</strong>
-                  <p>{ward.lgaName}</p>
-                  <p className="muted">{ward.pollingUnitsWithoutRecentActivity} polling units without recent activity</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+          <Panel title="Wards to staff first" meta={`${formatCount(unitsWithoutAgents.length)} units`} flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Ward</th>
+                  <th>LGA</th>
+                  <th className="numeric">Units without agents</th>
+                </tr>
+              }
+            >
+              {wardsWithNoAgents.length === 0 ? (
+                <EmptyRow colSpan={3}>All visible Polling Units have assigned agents.</EmptyRow>
+              ) : (
+                wardsWithNoAgents.map((ward) => (
+                  <tr key={`gap-${ward.wardId}`}>
+                    <td>{ward.wardName}</td>
+                    <td className="muted-text">{ward.lgaName}</td>
+                    <td className="numeric">{formatCount(ward.pollingUnitsWithoutAgents)}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Incident pressure</h2>
-              <p className="muted">Polling units with open incident pressure should be checked against tasking and incident review.</p>
-            </div>
-            <span className="status-pill">{unitsWithIncidentPressure.length} units</span>
-          </div>
-          {unitsWithIncidentPressure.length === 0 ? (
-            <p className="muted">No visible polling units currently carry open incident pressure.</p>
-          ) : (
-            <div className="reward-list">
-              {unitsWithIncidentPressure.slice(0, 12).map((unit) => (
-                <article key={`incident-${unit.pollingUnitId}`} className="reward-item">
-                  <strong>{unit.pollingUnitName}</strong>
-                  <p>{unit.wardName} | {unit.lgaName}</p>
-                  <p className="muted">{unit.openIncidentCount} open incidents | {unit.assignedAgentCount} assigned agents</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </section>
+          <Panel title="Activity follow-up" meta={`${formatCount(unitsWithoutRecentActivity.length)} units`} flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Ward</th>
+                  <th>LGA</th>
+                  <th className="numeric">Units without signal</th>
+                </tr>
+              }
+            >
+              {wardsWithNoRecentActivity.length === 0 ? (
+                <EmptyRow colSpan={3}>All visible Polling Units have recent field activity.</EmptyRow>
+              ) : (
+                wardsWithNoRecentActivity.map((ward) => (
+                  <tr key={`activity-${ward.wardId}`}>
+                    <td>{ward.wardName}</td>
+                    <td className="muted-text">{ward.lgaName}</td>
+                    <td className="numeric">{formatCount(ward.pollingUnitsWithoutRecentActivity)}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+
+          <Panel title="Incident pressure" meta={`${formatCount(unitsWithIncidentPressure.length)} units`} flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Polling Unit</th>
+                  <th>Ward / LGA</th>
+                  <th className="numeric">Open</th>
+                  <th className="numeric">Agents</th>
+                </tr>
+              }
+            >
+              {unitsWithIncidentPressure.length === 0 ? (
+                <EmptyRow colSpan={4}>No visible Polling Unit carries open incident pressure.</EmptyRow>
+              ) : (
+                unitsWithIncidentPressure.slice(0, 15).map((unit) => (
+                  <tr key={`incident-${unit.pollingUnitId}`}>
+                    <td>{unit.pollingUnitName}</td>
+                    <td className="muted-text">
+                      {unit.wardName} · {unit.lgaName}
+                    </td>
+                    <td className="numeric">{formatCount(unit.openIncidentCount)}</td>
+                    <td className="numeric">{formatCount(unit.assignedAgentCount)}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }
