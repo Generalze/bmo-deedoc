@@ -19,6 +19,16 @@ import {
   describeTerritory,
   getManagedRoleLabel,
 } from "../../../../components/admin-management-utils";
+import {
+  DataTable,
+  EmptyRow,
+  Kpi,
+  KpiRow,
+  PageHead,
+  Panel,
+  StateView,
+  formatCount,
+} from "../../../../components/ui";
 import { clearSession, readSession } from "../../../../lib/session";
 
 export default function AdminManageUsersPage() {
@@ -169,141 +179,178 @@ export default function AdminManageUsersPage() {
       setConfirmBusy(false);
     }
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading user management...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Manage users" />
+        <StateView kind="loading" title="Loading user management…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load users</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Manage users" />
+        <StateView
+          kind="error"
+          title="Unable to load users"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Scoped management</p>
-        <h1>Manage users</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
-      </section>
-
-      <AdminNav role={user?.role} />
-
-      <FeedbackBanner tone="error" message={error} />
-      <FeedbackBanner tone="success" message={message} />
-
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Total in view</h2>
-          <div className="value">{managedUsers.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Active</h2>
-          <div className="value">{managedUsers.filter((item) => item.isActive).length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Inactive</h2>
-          <div className="value">{managedUsers.filter((item) => !item.isActive).length}</div>
-        </article>
-      </section>
-
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>User list</h2>
-            <p className="muted">
-              {locator.role
-                ? `${getManagedRoleLabel(locator.role)} records in ${describeTerritory({
-                    ...emptyTerritorySummary(),
-                    stateId: locator.stateId || null,
-                    lgaId: locator.lgaId || null,
-                    wardId: locator.wardId || null,
-                  })}.`
-                : "Start from the locator to choose territory and role before loading records."}
-            </p>
-          </div>
-          <div className="action-row">
-            <Link href="/admin/manage/territory">Open locator</Link>
+    <main className="console-shell">
+      <PageHead
+        title="Manage users"
+        lead={`Visible scope: ${describeTerritory(user.adminProfile || emptyTerritorySummary())}`}
+        actions={
+          <>
+            <Link className="btn" href="/admin/manage/territory">
+              Open locator
+            </Link>
             {locator.role !== "VOTER" ? (
-              <Link href={locator.role ? `/admin/manage/create?role=${encodeURIComponent(locator.role)}&stateId=${encodeURIComponent(locator.stateId)}&lgaId=${encodeURIComponent(locator.lgaId)}&wardId=${encodeURIComponent(locator.wardId)}` : "/admin/manage/create"}>
+              <Link
+                className="btn btn-primary"
+                href={
+                  locator.role
+                    ? `/admin/manage/create?role=${encodeURIComponent(locator.role)}&stateId=${encodeURIComponent(locator.stateId)}&lgaId=${encodeURIComponent(locator.lgaId)}&wardId=${encodeURIComponent(locator.wardId)}`
+                    : "/admin/manage/create"
+                }
+              >
                 Create user
               </Link>
             ) : null}
-          </div>
-        </div>
+          </>
+        }
+      />
 
-        {!locator.role ? (
-          <p className="muted">Select a role and territory from the locator before opening scoped users.</p>
-        ) : managedUsers.length === 0 ? (
-          <p className="muted">No users found in this territory for the selected role.</p>
-        ) : (
-          <div className="reward-list">
-            {managedUsers.map((item) => (
-              <article key={item.userId} className="reward-item">
-                <div className="section-head compact">
-                  <div>
-                    <strong>{item.name}</strong>
-                    <p className="muted">{item.email}</p>
-                  </div>
-                  <span className={`status-pill ${item.isActive ? "active" : "inactive"}`}>
-                    {item.isActive ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <p>
-                  {item.role}
-                  {item.adminLevel ? ` | ${item.adminLevel}` : ""}
-                  {item.officeType ? ` | ${item.officeType}` : ""}
-                </p>
-                <p className="muted">{describeTerritory(item.territory)}</p>
-                <div className="action-row">
-                  {(item.role === "ADMIN" || item.role === "CANDIDATE" || item.role === "AGENT") ? (
-                    <Link
-                      className="button secondary"
-                      href={`/admin/manage/create?mode=edit&role=${encodeURIComponent(item.role)}&userId=${encodeURIComponent(item.userId)}`}
-                    >
-                      Edit User
-                    </Link>
-                  ) : null}
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={() => setConfirmState({ kind: "toggle", item, nextIsActive: !item.isActive })}
-                  >
-                    {item.isActive ? "Deactivate Account" : "Reactivate Account"}
-                  </button>
-                  {item.role === "AGENT" ? (
-                    <button
-                      className="button secondary"
-                      type="button"
-                      onClick={() => setConfirmState({ kind: "revoke-session", item })}
-                    >
-                      Revoke Session
-                    </button>
-                  ) : null}
-                  {!item.isActive ? (
-                    <button className="button danger" type="button" onClick={() => setConfirmState({ kind: "delete", item })}>
-                      Delete Account
-                    </button>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+      <AdminNav role={user?.role} />
+
+      <div className="stack-4">
+        <FeedbackBanner tone="error" message={error} />
+        <FeedbackBanner tone="success" message={message} />
+
+        <KpiRow>
+          <Kpi label="Total in view" value={formatCount(managedUsers.length)} />
+          <Kpi label="Active" value={formatCount(managedUsers.filter((item) => item.isActive).length)} />
+          <Kpi
+            label="Inactive"
+            value={formatCount(managedUsers.filter((item) => !item.isActive).length)}
+            tone={managedUsers.some((item) => !item.isActive) ? "warn" : undefined}
+          />
+        </KpiRow>
+
+        <Panel
+          title="User list"
+          meta={
+            locator.role
+              ? `${getManagedRoleLabel(locator.role)} in ${describeTerritory({
+                  ...emptyTerritorySummary(),
+                  stateId: locator.stateId || null,
+                  lgaId: locator.lgaId || null,
+                  wardId: locator.wardId || null,
+                })}`
+              : "No role selected"
+          }
+          flush
+        >
+          {!locator.role ? (
+            <div className="panel-body">
+              <StateView
+                kind="empty"
+                title="Start from the locator"
+                detail="Select a role and territory before opening scoped users."
+                action={
+                  <Link className="btn btn-primary" href="/admin/manage/territory">
+                    Open locator
+                  </Link>
+                }
+              />
+            </div>
+          ) : (
+            <DataTable
+              head={
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Territory</th>
+                  <th>Status</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {managedUsers.length === 0 ? (
+                <EmptyRow colSpan={5}>No users found in this territory for the selected role.</EmptyRow>
+              ) : (
+                managedUsers.map((item) => (
+                  <tr key={item.userId}>
+                    <td>
+                      <strong>{item.name}</strong>
+                      <div className="muted-text">{item.email}</div>
+                    </td>
+                    <td className="muted-text">
+                      {item.role.replace(/_/g, " ").toLowerCase()}
+                      {item.adminLevel ? <div>{item.adminLevel.replace(/_/g, " ").toLowerCase()}</div> : null}
+                      {item.officeType ? <div>{item.officeType.replace(/_/g, " ").toLowerCase()}</div> : null}
+                    </td>
+                    <td className="muted-text">{describeTerritory(item.territory)}</td>
+                    <td>
+                      <span className={item.isActive ? "pill pill-executed" : "pill pill-stale"}>
+                        {item.isActive ? "active" : "inactive"}
+                      </span>
+                    </td>
+                    <td className="actions">
+                      <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                        {item.role === "ADMIN" || item.role === "CANDIDATE" || item.role === "AGENT" ? (
+                          <Link
+                            className="btn btn-sm"
+                            href={`/admin/manage/create?mode=edit&role=${encodeURIComponent(item.role)}&userId=${encodeURIComponent(item.userId)}`}
+                          >
+                            Edit
+                          </Link>
+                        ) : null}
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={() => setConfirmState({ kind: "toggle", item, nextIsActive: !item.isActive })}
+                        >
+                          {item.isActive ? "Deactivate" : "Reactivate"}
+                        </button>
+                        {item.role === "AGENT" ? (
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() => setConfirmState({ kind: "revoke-session", item })}
+                          >
+                            Revoke session
+                          </button>
+                        ) : null}
+                        {!item.isActive ? (
+                          <button
+                            className="btn btn-sm btn-danger"
+                            type="button"
+                            onClick={() => setConfirmState({ kind: "delete", item })}
+                          >
+                            Delete
+                          </button>
+                        ) : null}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          )}
+        </Panel>
+      </div>
 
       <ConfirmDialog
         open={Boolean(confirmState)}

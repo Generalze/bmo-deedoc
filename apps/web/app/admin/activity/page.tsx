@@ -7,6 +7,17 @@ import { ApiError, fetchAuditLogs, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import {
+  DataTable,
+  EmptyRow,
+  PageHead,
+  Panel,
+  StateView,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarField,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const actionOptions = [
@@ -71,6 +82,7 @@ export default function AdminActivityPage() {
   const [targetType, setTargetType] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -129,118 +141,159 @@ export default function AdminActivityPage() {
       setLoading(false);
     }
   }
-
   if (loading && !user) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading activity history...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Activity history" />
+        <StateView kind="loading" title="Loading activity history…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load activity history</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Activity history" />
+        <StateView
+          kind="error"
+          title="Unable to load activity history"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Audit trail</p>
-        <h1>Activity history</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Activity history"
+        lead={`Audit trail · Visible scope: ${describeTerritory(
+          user.adminProfile || {
+            geoPoliticalZoneId: null,
+            stateId: null,
+            senatorialDistrictId: null,
+            federalConstituencyId: null,
+            lgaId: null,
+            wardId: null,
+            stateConstituencyId: null,
+            pollingUnitId: null,
+          },
+        )}`}
+      />
 
       <AdminNav role={user?.role} />
-      <FeedbackBanner tone="error" message={error} />
 
-      <section className="panel card">
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-          <label className="field">
-            <span>Action</span>
-            <select value={action} onChange={(event) => setAction(event.target.value)}>
-              {actionOptions.map((item) => (
-                <option key={item || "all"} value={item}>
-                  {item || "All visible actions"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Target type</span>
-            <select value={targetType} onChange={(event) => setTargetType(event.target.value)}>
-              {targetTypeOptions.map((item) => (
-                <option key={item || "all"} value={item}>
-                  {item || "All visible target types"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Date from</span>
-            <input type="datetime-local" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Date to</span>
-            <input type="datetime-local" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-          </label>
-        </div>
-        <div className="action-row" style={{ marginTop: 16 }}>
-          <button className="button" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
-            {loading ? "Loading..." : "Apply filters"}
-          </button>
-        </div>
-      </section>
+      <div className="stack-4">
+        <FeedbackBanner tone="error" message={error} />
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Recent activity</h2>
-            <p className="muted">This view is backend-filtered by your current permission and territory scope.</p>
+        <Panel
+          title="Recent activity"
+          meta={`${formatCount(visibleLogs.length)} visible`}
+          flush
+        >
+          <Toolbar>
+            <ToolbarField label="Action">
+              <select value={action} onChange={(event) => setAction(event.target.value)}>
+                {actionOptions.map((item) => (
+                  <option key={item || "all"} value={item}>
+                    {item ? item.replace(/_/g, " ").toLowerCase() : "All visible actions"}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Target type">
+              <select value={targetType} onChange={(event) => setTargetType(event.target.value)}>
+                {targetTypeOptions.map((item) => (
+                  <option key={item || "all"} value={item}>
+                    {item ? item.replace(/_/g, " ").toLowerCase() : "All target types"}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="From">
+              <input type="datetime-local" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+            </ToolbarField>
+            <ToolbarField label="To">
+              <input type="datetime-local" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+            </ToolbarField>
+            <ToolbarEnd>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
+                {loading ? "Loading…" : "Apply"}
+              </button>
+            </ToolbarEnd>
+          </Toolbar>
+
+          <div className="panel-body">
+            <p className="muted-text">This view is backend-filtered by your current permission and territory scope.</p>
           </div>
-          <span className="status-pill">{visibleLogs.length} visible</span>
-        </div>
 
-        {visibleLogs.length === 0 ? (
-          <p className="muted">No activity history is currently visible for this filter.</p>
-        ) : (
-          <div className="reward-list">
-            {visibleLogs.map((item) => (
-              <article key={item.id} className="reward-item">
-                <strong>{item.action}</strong>
-                <p>{item.targetType} | {item.targetId}</p>
-                <p className="muted">Actor: {item.actorName}</p>
-                <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
-                {item.metadata ? (
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem", margin: 0 }}>
-                    {JSON.stringify(item.metadata, null, 2)}
-                  </pre>
-                ) : (
-                  <p className="muted">No additional metadata.</p>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          <DataTable
+            head={
+              <tr>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Actor</th>
+                <th>When</th>
+                <th className="actions">Detail</th>
+              </tr>
+            }
+          >
+            {visibleLogs.length === 0 ? (
+              <EmptyRow colSpan={5}>No activity history is visible for this filter.</EmptyRow>
+            ) : (
+              visibleLogs.flatMap((item) => {
+                const open = expandedLogId === item.id;
+                const rows = [
+                  <tr key={item.id} className={open ? "row-open" : undefined}>
+                    <td>
+                      <strong>{item.action.replace(/_/g, " ").toLowerCase()}</strong>
+                    </td>
+                    <td className="muted-text">
+                      {item.targetType.replace(/_/g, " ").toLowerCase()}
+                      <div className="mono">{item.targetId}</div>
+                    </td>
+                    <td>{item.actorName}</td>
+                    <td className="muted-text">{new Date(item.createdAt).toLocaleString()}</td>
+                    <td className="actions">
+                      {item.metadata ? (
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          aria-expanded={open}
+                          onClick={() => setExpandedLogId(open ? null : item.id)}
+                        >
+                          {open ? "Hide" : "Metadata"}
+                        </button>
+                      ) : (
+                        <span className="muted-text">—</span>
+                      )}
+                    </td>
+                  </tr>,
+                ];
+
+                if (open && item.metadata) {
+                  rows.push(
+                    <tr key={`${item.id}-meta`} className="row-editor">
+                      <td colSpan={5}>
+                        <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                          {JSON.stringify(item.metadata, null, 2)}
+                        </pre>
+                      </td>
+                    </tr>,
+                  );
+                }
+
+                return rows;
+              })
+            )}
+          </DataTable>
+        </Panel>
+      </div>
     </main>
   );
 }
