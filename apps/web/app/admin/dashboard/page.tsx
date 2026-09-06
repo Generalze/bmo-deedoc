@@ -22,6 +22,19 @@ import {
   logoutCurrentUser,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Kpi,
+  KpiRow,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  StatusPill,
+  formatCount,
+} from "../../../components/ui";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
 import { clearSession, readSession } from "../../../lib/session";
 
@@ -97,207 +110,203 @@ export default function AdminDashboardPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading admin overview...</h1>
-          <p>Please wait while your scoped workspace is prepared.</p>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Admin overview" />
+        <StateView kind="loading" title="Preparing your scoped workspace…" />
       </main>
     );
   }
 
   if (!data) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load dashboard</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Admin overview" />
+        <StateView
+          kind="error"
+          title="Unable to load the overview"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">{getScopeTitle(data.user)}</p>
-        <h1>{data.user.name}</h1>
-        <p>Current territory scope: {territoryLabel}</p>
-        <p className="muted">
-          The overview shows only operational signals and next actions. Management, territory filtering, and account workflows now live on dedicated pages.
-        </p>
-        <div className="action-row" style={{ marginTop: 12 }}>
-          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+    <main className="console-shell">
+      <PageHead
+        title={data.user.name}
+        lead={`${getScopeTitle(data.user)} · ${territoryLabel}`}
+        actions={
+          <button className="btn" type="button" onClick={() => void handleLogout()}>
             Sign out
           </button>
-        </div>
-      </section>
+        }
+      />
 
       <AdminNav role={data?.user.role} />
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Agents in Scope</h2>
-          <div className="value">{data.summary.totalAgentsInScope}</div>
-        </article>
-        <article className="panel card">
-          <h2>Voters in Scope</h2>
-          <div className="value">{data.summary.totalVotersInScope}</div>
-        </article>
-        <article className="panel card">
-          <h2>Open Incidents</h2>
-          <div className="value">{data.summary.totalIncidentsOpen}</div>
-        </article>
-        <article className="panel card">
-          <h2>Critical Incidents</h2>
-          <div className="value">{data.summary.totalIncidentsCritical}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        <KpiRow>
+          <Kpi label="Agents in scope" value={formatCount(data.summary.totalAgentsInScope)} />
+          <Kpi label="Voters in scope" value={formatCount(data.summary.totalVotersInScope)} />
+          <Kpi
+            label="Open incidents"
+            value={formatCount(data.summary.totalIncidentsOpen)}
+            tone={data.summary.totalIncidentsOpen > 0 ? "accent" : undefined}
+          />
+          <Kpi
+            label="Critical incidents"
+            value={formatCount(data.summary.totalIncidentsCritical)}
+            note={data.summary.totalIncidentsCritical > 0 ? "Needs attention now" : "None open"}
+            tone={data.summary.totalIncidentsCritical > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Units without recent activity"
+            value={formatCount(data.coverage.pollingUnitsWithoutActivity)}
+            note="Polling Units with no field signal"
+            tone={data.coverage.pollingUnitsWithoutActivity > 0 ? "warn" : undefined}
+          />
+        </KpiRow>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Territory Coverage</h2>
-          {data.coverage.scopeWarning ? <p className="muted">{data.coverage.scopeWarning}</p> : null}
-          <div className="reward-list">
-            <article className="reward-item">
-              <strong>States in scope</strong>
-              <p>{data.coverage.totalStatesInScope}</p>
-            </article>
-            <article className="reward-item">
-              <strong>LGAs in scope</strong>
-              <p>{data.coverage.totalLgasInScope}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Wards in scope</strong>
-              <p>{data.coverage.totalWardsInScope}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Polling units in scope</strong>
-              <p>{data.coverage.totalPollingUnitsInScope}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Assigned agents</strong>
-              <p>{data.coverage.pollingUnitsWithAssignedAgents}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Recent activity</strong>
-              <p>{data.coverage.pollingUnitsWithRecentActivity}</p>
-            </article>
-            <article className="reward-item">
-              <strong>Units without recent activity</strong>
-              <p>{data.coverage.pollingUnitsWithoutActivity}</p>
-            </article>
-          </div>
-        </section>
+        <PanelGrid wide>
+          <Panel title="Territory coverage" meta={data.coverage.scopeWarning || undefined}>
+            <DetailList
+              rows={[
+                { label: "States", value: formatCount(data.coverage.totalStatesInScope) },
+                { label: "LGAs", value: formatCount(data.coverage.totalLgasInScope) },
+                { label: "Wards", value: formatCount(data.coverage.totalWardsInScope) },
+                { label: "Polling Units", value: formatCount(data.coverage.totalPollingUnitsInScope) },
+                { label: "With assigned agents", value: formatCount(data.coverage.pollingUnitsWithAssignedAgents) },
+                { label: "With recent activity", value: formatCount(data.coverage.pollingUnitsWithRecentActivity) },
+                {
+                  label: "Without activity",
+                  value: formatCount(data.coverage.pollingUnitsWithoutActivity),
+                },
+              ]}
+            />
+          </Panel>
 
-        <section className="panel card">
-          <h2>Management Workflow</h2>
-          <div className="reward-list">
-            <article className="reward-item">
-              <strong>Start with management</strong>
-              <p>Open the management workspace first to keep user, territory, and creation actions inside one controlled workflow.</p>
-              <Link href="/admin/manage">Open management hub</Link>
-            </article>
-            <article className="reward-item">
-              <strong>Select territory in workflow</strong>
-              <p>Choose state, LGA, and ward scope from the management flow before reviewing users or creating new accounts.</p>
-              <Link href="/admin/manage/territory">Open territory selector</Link>
-            </article>
-            <article className="reward-item">
-              <strong>Manage users</strong>
-              <p>Review scoped user lists, edit assignments, and control activation after narrowing the territory you are working in.</p>
-              <Link href="/admin/manage/users">Open user management</Link>
-            </article>
-            <article className="reward-item">
-              <strong>Create users</strong>
-              <p>Move from territory selection into role-aware creation for admins, candidates, and agents without leaving the management path.</p>
-              <Link href="/admin/manage/create">Open create workflow</Link>
-            </article>
-          </div>
-        </section>
-
-        <section className="panel card">
-          <h2>Monitoring Workflow</h2>
-          <div className="reward-list">
-            <article className="reward-item">
-              <strong>Live operations</strong>
-              <p>Monitor visible agents, map activity, and field movement inside your authorized territory.</p>
-              <Link href="/admin/operations/live">Open live ops</Link>
-            </article>
-            <article className="reward-item">
-              <strong>Coverage intelligence</strong>
-              <p>Identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
-              <Link href="/admin/operations/coverage">Open coverage</Link>
-            </article>
-            <article className="reward-item">
-              <strong>Incidents and election reports</strong>
-              <p>Review flagged incidents, escalation state, and election-day reports as part of the same monitoring surface.</p>
-              <div className="action-row" style={{ marginTop: 12 }}>
-                <Link href="/admin/incidents">Open incidents</Link>
-                <Link href="/admin/election-reports">Open election reports</Link>
+          {/*
+            These were two panels of eight link cards, each with a paragraph of
+            prose explaining a destination that AdminNav already lists directly
+            above. Every destination is kept; the duplicated explanation is not.
+          */}
+          <Panel title="Jump to">
+            <div className="stack-3">
+              <div>
+                <span className="kpi-label">Management</span>
+                <div className="btn-row">
+                  <Link className="btn btn-sm" href="/admin/manage">
+                    Management hub
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/manage/territory">
+                    Territory selector
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/manage/users">
+                    User management
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/manage/create">
+                    Create users
+                  </Link>
+                </div>
               </div>
-            </article>
-            <article className="reward-item">
-              <strong>Send communications</strong>
-              <p>Preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
-              <Link href="/admin/communications">Open communications</Link>
-            </article>
-          </div>
-        </section>
-      </section>
-
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Recent Field Activity</h2>
-          {data.agentActivity.length === 0 ? (
-            <p className="muted">No recent agent activity is visible in this territory.</p>
-          ) : (
-            <div className="reward-list">
-              {data.agentActivity.slice(0, 5).map((item) => (
-                <article key={item.agentUserId} className="reward-item">
-                  <strong>{item.name}</strong>
-                  <p>{item.latestActivityType || "No recent activity"}</p>
-                  <p className="muted">{item.latestActivityAt ? new Date(item.latestActivityAt).toLocaleString() : "No timestamp"}</p>
-                </article>
-              ))}
+              <div>
+                <span className="kpi-label">Monitoring</span>
+                <div className="btn-row">
+                  <Link className="btn btn-sm" href="/admin/operations/live">
+                    Live operations
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/operations/coverage">
+                    Coverage
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/incidents">
+                    Incidents
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/election-reports">
+                    Election reports
+                  </Link>
+                  <Link className="btn btn-sm" href="/admin/communications">
+                    Communications
+                  </Link>
+                </div>
+              </div>
             </div>
-          )}
-        </section>
+          </Panel>
+        </PanelGrid>
 
-        <section className="panel card">
-          <h2>Notifications</h2>
-          {data.notifications.length === 0 ? (
-            <p className="muted">No notifications yet.</p>
-          ) : (
-            <div className="reward-list">
-              {data.notifications.slice(0, 5).map((item) => (
-                <article key={item.id} className="reward-item">
-                  <strong>{item.title}</strong>
-                  <p>{item.message}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+        <PanelGrid>
+          <Panel title="Recent field activity" flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Agent</th>
+                  <th>Latest activity</th>
+                  <th>When</th>
+                </tr>
+              }
+            >
+              {data.agentActivity.length === 0 ? (
+                <EmptyRow colSpan={3}>No recent agent activity in this territory.</EmptyRow>
+              ) : (
+                data.agentActivity.slice(0, 8).map((item) => (
+                  <tr key={item.agentUserId}>
+                    <td>{item.name}</td>
+                    <td className="muted-text">{item.latestActivityType || "No recent activity"}</td>
+                    <td className="muted-text">
+                      {item.latestActivityAt ? new Date(item.latestActivityAt).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-        <section className="panel card">
-          <h2>Redemption Queue</h2>
-          {data.redemptions.length === 0 ? (
-            <p className="muted">No redemption requests are waiting in this scope.</p>
-          ) : (
-            <div className="reward-list">
-              {data.redemptions.slice(0, 5).map((item) => (
-                <article key={item.id} className="reward-item">
-                  <strong>{item.status}</strong>
-                  <p>{item.pointsRequested} points requested</p>
-                  <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </section>
+          <Panel title="Redemption queue" flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Status</th>
+                  <th className="numeric">Points requested</th>
+                  <th>Requested</th>
+                </tr>
+              }
+            >
+              {data.redemptions.length === 0 ? (
+                <EmptyRow colSpan={3}>No redemption requests waiting in this scope.</EmptyRow>
+              ) : (
+                data.redemptions.slice(0, 8).map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <StatusPill status={item.status} />
+                    </td>
+                    <td className="numeric">{formatCount(item.pointsRequested)}</td>
+                    <td className="muted-text">{new Date(item.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+
+          <Panel title="Notifications">
+            {data.notifications.length === 0 ? (
+              <StateView kind="empty" title="No notifications yet" />
+            ) : (
+              <ul className="stack-3" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {data.notifications.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.title}</strong>
+                    <p className="muted-text">{item.message}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }

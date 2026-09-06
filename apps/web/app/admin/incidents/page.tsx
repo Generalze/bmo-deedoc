@@ -11,6 +11,21 @@ import {
 import { ApiError, fetchAdminIncidentReview, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import {
+  DataTable,
+  EmptyRow,
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  StateView,
+  StatusPill,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarField,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 const statusOptions = ["", "OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
@@ -92,171 +107,215 @@ export default function AdminIncidentsPage() {
       .sort((left, right) => right[1] - left[1])
       .slice(0, 4);
   }, [governance]);
-
   if (loading && !user) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading incident review...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Incident review" />
+        <StateView kind="loading" title="Loading incident review…" />
       </main>
     );
   }
 
   if (!user || !governance) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load incident review</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Incident review" />
+        <StateView
+          kind="error"
+          title="Unable to load incident review"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Incident governance</p>
-        <h1>Incident review queue</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Incident review queue"
+        lead={`Visible scope: ${describeTerritory(
+          user.adminProfile || {
+            geoPoliticalZoneId: null,
+            stateId: null,
+            senatorialDistrictId: null,
+            federalConstituencyId: null,
+            lgaId: null,
+            wardId: null,
+            stateConstituencyId: null,
+            pollingUnitId: null,
+          },
+        )}`}
+      />
 
       <AdminNav role={user?.role} />
-      {error ? <p className="error">{error}</p> : null}
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Total incidents</h2>
-          <div className="value">{governance.totalIncidents}</div>
-        </article>
-        <article className="panel card">
-          <h2>Flagged incidents</h2>
-          <div className="value">{governance.flaggedIncidents}</div>
-        </article>
-        <article className="panel card">
-          <h2>Critical review</h2>
-          <div className="value">{governance.criticalReviewIncidents}</div>
-        </article>
-        <article className="panel card">
-          <h2>Escalated</h2>
-          <div className="value">{governance.escalatedIncidents}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-          <label className="field">
-            <span>Status</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              {statusOptions.map((option) => (
-                <option key={option || "all"} value={option}>
-                  {option || "All visible statuses"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Incident type</span>
-            <select value={incidentType} onChange={(event) => setIncidentType(event.target.value)}>
-              <option value="">All visible incident types</option>
-              {INCIDENT_TYPES.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Review priority</span>
-            <select value={reviewPriority} onChange={(event) => setReviewPriority(event.target.value)}>
-              {reviewPriorityOptions.map((option) => (
-                <option key={option || "all"} value={option}>
-                  {option || "All review priorities"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="checkbox-field" style={{ alignSelf: "end" }}>
-            <input type="checkbox" checked={flaggedOnly} onChange={(event) => setFlaggedOnly(event.target.checked)} />
-            <span>Show flagged incidents only</span>
-          </label>
-        </div>
-        <div className="action-row" style={{ marginTop: 16 }}>
-          <button className="button" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
-            {loading ? "Loading..." : "Apply filters"}
-          </button>
-        </div>
-      </section>
+        <KpiRow>
+          <Kpi label="Total incidents" value={formatCount(governance.totalIncidents)} />
+          <Kpi
+            label="Flagged"
+            value={formatCount(governance.flaggedIncidents)}
+            note="Carry at least one advisory signal"
+            tone={governance.flaggedIncidents > 0 ? "accent" : undefined}
+          />
+          <Kpi
+            label="Critical review"
+            value={formatCount(governance.criticalReviewIncidents)}
+            tone={governance.criticalReviewIncidents > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Escalated"
+            value={formatCount(governance.escalatedIncidents)}
+            tone={governance.escalatedIncidents > 0 ? "warn" : undefined}
+          />
+        </KpiRow>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Review signals</h2>
-            <p className="muted">Signals are advisory. They surface potential duplicate, territory mismatch, assignment, and evidence gaps without blocking submissions.</p>
+        <Panel
+          title="Review signals"
+          meta={`${formatCount(incidents.length)} visible`}
+          flush
+        >
+          <Toolbar>
+            <ToolbarField label="Status">
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                {statusOptions.map((option) => (
+                  <option key={option || "all"} value={option}>
+                    {option ? option.replace(/_/g, " ").toLowerCase() : "All visible statuses"}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Type">
+              <select value={incidentType} onChange={(event) => setIncidentType(event.target.value)}>
+                <option value="">All types</option>
+                {INCIDENT_TYPES.map((option) => (
+                  <option key={option} value={option}>
+                    {option.replace(/_/g, " ").toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Review priority">
+              <select value={reviewPriority} onChange={(event) => setReviewPriority(event.target.value)}>
+                {reviewPriorityOptions.map((option) => (
+                  <option key={option || "all"} value={option}>
+                    {option ? option.toLowerCase() : "All priorities"}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <label>
+              <input type="checkbox" checked={flaggedOnly} onChange={(event) => setFlaggedOnly(event.target.checked)} />
+              <span>Flagged only</span>
+            </label>
+            <ToolbarEnd>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
+                {loading ? "Loading…" : "Apply"}
+              </button>
+            </ToolbarEnd>
+          </Toolbar>
+
+          <div className="panel-body stack-2">
+            <p className="muted-text">
+              Signals are advisory. They surface potential duplicate, territory mismatch, assignment and evidence gaps
+              without blocking submissions.
+            </p>
+            {topFlags.length ? (
+              <div className="cluster">
+                {topFlags.map(([code, count]) => (
+                  <span key={code} className="pill pill-stale">
+                    {code}: {count}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
-          <span className="status-pill">{incidents.length} visible</span>
-        </div>
-        {topFlags.length ? (
-          <div className="badges" style={{ marginTop: 12, marginBottom: 12 }}>
-            {topFlags.map(([code, count]) => (
-              <span key={code} className="status-pill">
-                {code}: {count}
-              </span>
-            ))}
-          </div>
-        ) : null}
 
-        {incidents.length === 0 ? (
-          <p className="muted">No incidents match the current review filter.</p>
-        ) : (
-          <div className="reward-list">
-            {incidents.map((incident) => (
-              <article key={incident.id} className="reward-item">
-                <strong>{incident.title}</strong>
-                <p>{incident.type} | {incident.severity} | {incident.status}</p>
-                <p className="muted">
-                  Reporter: {incident.governance?.reporterRole || "Unknown"} | Review priority: {incident.governance?.reviewPriority || "ROUTINE"} | Escalation: {incident.governance?.escalationStatus || "NOT_ESCALATED"}
-                </p>
-                <p className="muted">
-                  {new Date(incident.createdAt).toLocaleString()}
-                </p>
-                <div className="action-row" style={{ marginTop: 12 }}>
-                  <Link href={`/admin/evidence?incidentId=${encodeURIComponent(incident.id)}`}>Open linked evidence</Link>
-                  {incident.pollingUnitId ? (
-                    <Link href={`/admin/evidence?pollingUnitId=${encodeURIComponent(incident.pollingUnitId)}`}>
-                      Open PU dossier
-                    </Link>
-                  ) : null}
-                </div>
-                {incident.governance?.flags.length ? (
-                  <div className="reward-list" style={{ marginTop: 12 }}>
-                    {incident.governance.flags.map((flag) => (
-                      <article key={`${incident.id}-${flag.code}`} className="reward-item">
-                        <strong>{flag.code}</strong>
-                        <p>{flag.message}</p>
-                        <p className="muted">{flag.severity}</p>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted">No governance flags on this incident.</p>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          <DataTable
+            head={
+              <tr>
+                <th>Incident</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Review</th>
+                <th>Signals</th>
+                <th>Reported</th>
+                <th className="actions">Links</th>
+              </tr>
+            }
+          >
+            {incidents.length === 0 ? (
+              <EmptyRow colSpan={7}>No incidents match the current review filter.</EmptyRow>
+            ) : (
+              incidents.map((incident) => (
+                <tr key={incident.id}>
+                  <td>
+                    <strong>{incident.title}</strong>
+                    <div className="muted-text">{incident.type.replace(/_/g, " ").toLowerCase()}</div>
+                  </td>
+                  <td className="muted-text">{incident.severity.replace(/_/g, " ").toLowerCase()}</td>
+                  <td>
+                    <StatusPill status={incident.status} />
+                  </td>
+                  <td className="muted-text">
+                    {(incident.governance?.reviewPriority || "ROUTINE").toLowerCase()}
+                    <div>{(incident.governance?.escalationStatus || "NOT_ESCALATED").replace(/_/g, " ").toLowerCase()}</div>
+                  </td>
+                  <td>
+                    {incident.governance?.flags.length ? (
+                      <span className="cluster">
+                        {incident.governance.flags.map((flag) => (
+                          <span
+                            key={`${incident.id}-${flag.code}`}
+                            className={
+                              flag.severity === "HIGH"
+                                ? "pill pill-error"
+                                : flag.severity === "WARNING"
+                                  ? "pill pill-pending"
+                                  : "pill pill-stale"
+                            }
+                            title={flag.message}
+                          >
+                            {flag.code.replace(/_/g, " ").toLowerCase()}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="muted-text">None</span>
+                    )}
+                  </td>
+                  <td className="muted-text">
+                    {new Date(incident.createdAt).toLocaleString()}
+                    <div>{incident.governance?.reporterRole || "Unknown reporter"}</div>
+                  </td>
+                  <td className="actions">
+                    <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                      <Link className="btn btn-sm" href={`/admin/evidence?incidentId=${encodeURIComponent(incident.id)}`}>
+                        Evidence
+                      </Link>
+                      {incident.pollingUnitId ? (
+                        <Link
+                          className="btn btn-sm"
+                          href={`/admin/evidence?pollingUnitId=${encodeURIComponent(incident.pollingUnitId)}`}
+                        >
+                          PU dossier
+                        </Link>
+                      ) : null}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
+      </div>
     </main>
   );
 }
