@@ -16,11 +16,16 @@ import { AdminNav } from "../../../components/admin-nav";
 import { PaymentReferenceDialog } from "../../../components/payment-reference-dialog";
 import {
   DataTable,
+  EmptyRow,
+  Kpi,
+  KpiRow,
   Money,
   Notice,
+  PageHead,
   Panel,
   StateView,
   StatusPill,
+  Toolbar,
   formatCount,
   formatMoney,
 } from "../../../components/ui";
@@ -114,115 +119,132 @@ export default function AdminRewardsPage() {
 
   if (loading && !user) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading rewards...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Rewards and redemptions" />
+        <StateView kind="loading" title="Loading rewards…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load rewards</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/dashboard">Return to admin overview</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Rewards and redemptions" />
+        <StateView
+          kind="error"
+          title="Unable to load rewards"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/admin/dashboard">
+              Return to admin overview
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Reward accountability</p>
-        <h1>Rewards and redemptions</h1>
-        <p>Visible scope: {describeTerritory(user.adminProfile || {
-          geoPoliticalZoneId: null,
-          stateId: null,
-          senatorialDistrictId: null,
-          federalConstituencyId: null,
-          lgaId: null,
-          wardId: null,
-          stateConstituencyId: null,
-          pollingUnitId: null,
-        })}</p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Rewards and redemptions"
+        lead={`Visible scope: ${describeTerritory(
+          user.adminProfile || {
+            geoPoliticalZoneId: null,
+            stateId: null,
+            senatorialDistrictId: null,
+            federalConstituencyId: null,
+            lgaId: null,
+            wardId: null,
+            stateConstituencyId: null,
+            pollingUnitId: null,
+          },
+        )}`}
+      />
 
       <AdminNav role={user?.role} />
-      {error ? <p className="error">{error}</p> : null}
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Pending review</h2>
-          <div className="value">{summary.pending}</div>
-        </article>
-        <article className="panel card">
-          <h2>Approved</h2>
-          <div className="value">{summary.approved}</div>
-        </article>
-        <article className="panel card">
-          <h2>Paid</h2>
-          <div className="value">{summary.paid}</div>
-        </article>
-        <article className="panel card">
-          <h2>Rejected</h2>
-          <div className="value">{summary.rejected}</div>
-        </article>
-        <article className="panel card">
-          <h2>Legacy posted points</h2>
-          <div className="value">{summary.postedPoints}</div>
-          <p className="muted">
-            Historical total from the read-only legacy ledger. New earnings post to the authoritative ledger and are
-            not counted here.
-          </p>
-        </article>
-      </section>
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Visible reward history</h2>
-            <p className="muted">
+        <KpiRow>
+          <Kpi
+            label="Pending review"
+            value={formatCount(summary.pending)}
+            note="Redemptions awaiting a decision"
+            tone={summary.pending > 0 ? "accent" : undefined}
+          />
+          <Kpi label="Approved" value={formatCount(summary.approved)} note="Valued, not yet paid" />
+          <Kpi label="Paid" value={formatCount(summary.paid)} note="Executed with a payment reference" />
+          <Kpi label="Rejected" value={formatCount(summary.rejected)} note="Declined on review" />
+          <Kpi
+            label="Legacy posted points"
+            value={formatCount(summary.postedPoints)}
+            note="Read-only history. New earnings post to the authoritative ledger and are not counted here."
+            tone="warn"
+          />
+        </KpiRow>
+
+        <Panel
+          title="Visible reward history"
+          meta={`${formatCount(rewardHistory.length)} entries`}
+          flush
+        >
+          <div className="panel-body">
+            <p className="muted-text">
               Legacy ledger entries and redemption review status inside your allowed scope. The legacy ledger is
               read-only; it records history and is not the balance any payment is made from.
             </p>
           </div>
-          <span className="status-pill">{rewardHistory.length} entries</span>
-        </div>
-        {rewardLedger.length > 0 ? (
-          <div className="badge-row" style={{ marginBottom: 16 }}>
-            {Object.entries(ledgerTypeBreakdown).map(([label, count]) => (
-              <span key={label} className="status-badge live">
-                {label}: {count}
-              </span>
-            ))}
-          </div>
-        ) : null}
 
-        {rewardHistory.length === 0 ? (
-          <p className="muted">No reward history is visible in your current scope.</p>
-        ) : (
-          <div className="reward-list">
-            {rewardHistory.slice(0, 20).map((entry) => (
-              <article key={`${entry.kind}-${entry.id}`} className="reward-item">
-                <strong>{entry.title}</strong>
-                <p>{entry.description}</p>
-                <p className="muted">
-                  {entry.kind === "EARNED" ? "Earned entry" : "Redemption"} | {entry.status} | {entry.points} points
-                </p>
-                {entry.amount !== null ? <p className="muted">Amount: {entry.amount}</p> : null}
-                <p className="muted">
-                  Created {new Date(entry.createdAt).toLocaleString()}
-                  {entry.reviewedAt ? ` | Reviewed ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
-                </p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          {rewardLedger.length > 0 ? (
+            <Toolbar>
+              <span className="cluster">
+                {Object.entries(ledgerTypeBreakdown).map(([label, count]) => (
+                  <span key={label} className="pill pill-stale">
+                    {label}: {count}
+                  </span>
+                ))}
+              </span>
+            </Toolbar>
+          ) : null}
+
+          <DataTable
+            head={
+              <tr>
+                <th>Entry</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th className="numeric">Points</th>
+                <th className="numeric">Amount</th>
+                <th>When</th>
+              </tr>
+            }
+          >
+            {rewardHistory.length === 0 ? (
+              <EmptyRow colSpan={6}>No reward history is visible in your current scope.</EmptyRow>
+            ) : (
+              rewardHistory.slice(0, 20).map((entry) => (
+                <tr key={`${entry.kind}-${entry.id}`}>
+                  <td>
+                    <strong>{entry.title}</strong>
+                    {entry.description ? <div className="muted-text">{entry.description}</div> : null}
+                  </td>
+                  <td className="muted-text">{entry.kind === "EARNED" ? "Earned" : "Redemption"}</td>
+                  <td>
+                    <StatusPill status={entry.status} />
+                  </td>
+                  <td className="numeric">{formatCount(entry.points)}</td>
+                  <td className="numeric">{entry.amount !== null ? formatMoney(entry.amount) : "—"}</td>
+                  <td className="muted-text">
+                    {new Date(entry.createdAt).toLocaleDateString()}
+                    {entry.reviewedAt ? ` · reviewed ${new Date(entry.reviewedAt).toLocaleDateString()}` : ""}
+                  </td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
 
       {message ? <Notice tone="ok" title={message} /> : null}
       {problem ? (
@@ -336,6 +358,7 @@ export default function AdminRewardsPage() {
           });
         }}
       />
+      </div>
     </main>
   );
 }

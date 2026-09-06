@@ -5,7 +5,25 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { OGUN_STATE_ID, type AuthUserProfile } from "@pics-nigeria/shared";
 import { AdminNav } from "../../../components/admin-nav";
 import { PaymentReferenceDialog } from "../../../components/payment-reference-dialog";
-import { DataTable, Notice, StatusPill, formatCount, formatMoney } from "../../../components/ui";
+import {
+  DataTable,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  Money,
+  Notice,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  StatusPill,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarField,
+  formatCount,
+  formatMoney,
+} from "../../../components/ui";
 import { describeApiError, type DescribedError } from "../../../lib/api-errors";
 import {
   ApiError,
@@ -291,259 +309,652 @@ export default function AdminPreElectionPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading pre-election workspace...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Pre-election operations" />
+        <StateView kind="loading" title="Loading pre-election workspace…" />
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load pre-election workspace</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/login">Return to admin login</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Pre-election operations" />
+        <StateView
+          kind="error"
+          title="Unable to load the pre-election workspace"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
+  const assignmentRows = (isPayoutOfficer ? payoutAssignments : payoutBatches.flatMap((batch) => batch.assignments)).slice(0, 50);
+
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <p className="eyebrow">Sprint 3 Pre-Election</p>
-        <h1>Product completion workspace</h1>
-        <p>
-          Verification, referrals, rewards, payouts, and strength analytics for pre-election organization. Rewards are limited to verified membership and approved organizational work, never vote choice or ballot proof.
-        </p>
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Pre-election operations"
+        lead="Verification, referrals, rewards, payouts and strength analytics. Rewards follow verified membership and approved organisational work — never vote choice or proof of a ballot."
+      />
 
       <AdminNav role={user?.role} />
-      {message ? <p className="feedback-banner success">{message}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Pending Reviews</h2>
-          <div className="value">{verificationCounts.PENDING || 0}</div>
-        </article>
-        <article className="panel card">
-          <h2>Referral Records</h2>
-          <div className="value">{referralSummary.total || referrals.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Payout Batches</h2>
-          <div className="value">{payoutBatches.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Strength Score</h2>
-          <div className="value">{strengthDashboard?.latestStrengthSnapshot?.score || "N/A"}</div>
-        </article>
-      </section>
+      <div className="stack-4">
+        {message ? <Notice tone="ok" title={message} /> : null}
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
 
-      {isValidator || isSuperAdmin ? (
-        <section className="panel card" style={{ marginTop: 24 }}>
-          <div className="section-head">
-            <div>
-              <h2>Validator Queue</h2>
-              <p className="muted">Claim, review, approve, reject, or request resubmission. Document access is audited and short lived.</p>
-            </div>
-            <button className="button secondary" type="button" onClick={() => token && exportPreElectionVerificationsCsv(token, verificationFilter).then(() => setMessage("CSV export generated."))}>
-              Export CSV
-            </button>
-          </div>
-          <div className="map-filter-row" style={{ marginBottom: 16 }}>
-            <select value={verificationFilter.status} onChange={(event) => setVerificationFilter({ ...verificationFilter, status: event.target.value })}>
-              {verificationStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-            <input placeholder="Search member or VIN" value={verificationFilter.search} onChange={(event) => setVerificationFilter({ ...verificationFilter, search: event.target.value })} />
-            <button className="button secondary" type="button" onClick={() => void reload()}>Apply</button>
-          </div>
-          <div className="reward-list">
-            {verifications.map((item) => (
-              <article key={item.id} className="reward-item">
-                <strong>{item.memberName}</strong>
-                <p>{item.memberEmail} | {item.status} | {item.documents.length} document(s)</p>
-                {item.isFlagged ? <p className="error">Flagged: {item.fraudReason}</p> : null}
-                <input placeholder="Decision note" value={decisionNoteById[item.id] || ""} onChange={(event) => setDecisionNoteById({ ...decisionNoteById, [item.id]: event.target.value })} />
-                <div className="action-row" style={{ marginTop: 12 }}>
-                  <button className="button secondary" type="button" onClick={() => token && claimPreElectionVerification(token, item.id).then(() => reload())}>Claim</button>
-                  {item.documents[0] ? (
-                    <button className="button secondary" type="button" onClick={() => token && accessPreElectionVerificationDocument(token, item.id, item.documents[0].id).then((access) => setMessage(`Access token issued for ${access.storageKey}`))}>
-                      Access document
-                    </button>
-                  ) : null}
-                  <button className="button" type="button" onClick={() => void handleVerificationDecision(item.id, "APPROVE")}>Approve</button>
-                  <button className="button secondary" type="button" onClick={() => void handleVerificationDecision(item.id, "REQUEST_RESUBMISSION")}>Resubmit</button>
-                  <button className="button danger" type="button" onClick={() => void handleVerificationDecision(item.id, "REJECT")}>Reject</button>
+        <KpiRow>
+          <Kpi
+            label="Awaiting review"
+            value={formatCount(verificationCounts.PENDING || 0)}
+            note="Verification cases in the validator queue"
+            tone={(verificationCounts.PENDING || 0) > 0 ? "accent" : undefined}
+          />
+          <Kpi
+            label="Eligible beneficiaries"
+            value={formatCount(payoutEligibility.length)}
+            note="Meet the active payout threshold"
+          />
+          <Kpi
+            label="Payout batches"
+            value={formatCount(payoutBatches.length)}
+            note={`${formatCount(assignmentRows.length)} assignments shown`}
+          />
+          <Kpi
+            label="Strength score"
+            value={strengthDashboard?.latestStrengthSnapshot?.score ?? "—"}
+            note={`${territory.territoryType.replace(/_/g, " ").toLowerCase()} scope`}
+          />
+        </KpiRow>
+
+        {isValidator || isSuperAdmin ? (
+          <Panel
+            title="Validator queue"
+            meta="Document access is audited and short lived"
+            actions={
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => {
+                  if (!token) return;
+                  exportPreElectionVerificationsCsv(token, verificationFilter)
+                    .then(() => setMessage("CSV export generated."))
+                    .catch((caught) => setError(describeApiError(caught).detail));
+                }}
+              >
+                Export CSV
+              </button>
+            }
+            flush
+          >
+            <Toolbar>
+              <ToolbarField label="Status">
+                <select
+                  value={verificationFilter.status}
+                  onChange={(event) => setVerificationFilter({ ...verificationFilter, status: event.target.value })}
+                >
+                  {verificationStatuses.map((status) => (
+                    <option key={status} value={status}>
+                      {status.replace(/_/g, " ").toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </ToolbarField>
+              <ToolbarField label="Search member or VIN" hideLabel>
+                <input
+                  type="search"
+                  placeholder="Search member or VIN"
+                  value={verificationFilter.search}
+                  onChange={(event) => setVerificationFilter({ ...verificationFilter, search: event.target.value })}
+                />
+              </ToolbarField>
+              <ToolbarEnd>
+                <button className="btn btn-sm" type="button" onClick={() => void reload()}>
+                  Apply
+                </button>
+              </ToolbarEnd>
+            </Toolbar>
+
+            <DataTable
+              head={
+                <tr>
+                  <th>Member</th>
+                  <th>Status</th>
+                  <th className="numeric">Docs</th>
+                  <th>Decision note</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {verifications.length === 0 ? (
+                <EmptyRow colSpan={5}>No verification cases match this filter.</EmptyRow>
+              ) : (
+                verifications.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <strong>{item.memberName}</strong>
+                      <div className="muted-text">{item.memberEmail}</div>
+                      {item.isFlagged ? (
+                        <div className="pill pill-error" title={item.fraudReason || undefined}>
+                          flagged
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <StatusPill status={item.status} />
+                    </td>
+                    <td className="numeric">{formatCount(item.documents.length)}</td>
+                    <td>
+                      <label className="sr-only" htmlFor={`note-${item.id}`}>
+                        Decision note for {item.memberName}
+                      </label>
+                      <input
+                        id={`note-${item.id}`}
+                        placeholder="Reason for the decision"
+                        value={decisionNoteById[item.id] || ""}
+                        onChange={(event) => setDecisionNoteById({ ...decisionNoteById, [item.id]: event.target.value })}
+                      />
+                    </td>
+                    <td className="actions">
+                      <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={() => token && claimPreElectionVerification(token, item.id).then(() => reload())}
+                        >
+                          Claim
+                        </button>
+                        {item.documents[0] ? (
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() =>
+                              token &&
+                              accessPreElectionVerificationDocument(token, item.id, item.documents[0].id)
+                                .then((access) => setMessage(`Access token issued for ${access.storageKey}`))
+                                .catch((caught) => setError(describeApiError(caught).detail))
+                            }
+                          >
+                            Document
+                          </button>
+                        ) : null}
+                        <button
+                          className="btn btn-sm btn-primary"
+                          type="button"
+                          onClick={() => void handleVerificationDecision(item.id, "APPROVE")}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={() => void handleVerificationDecision(item.id, "REQUEST_RESUBMISSION")}
+                        >
+                          Resubmit
+                        </button>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          type="button"
+                          onClick={() => void handleVerificationDecision(item.id, "REJECT")}
+                        >
+                          Reject
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+        ) : null}
+
+        {referrals.length || canViewStrength ? (
+          <PanelGrid wide>
+            <Panel title="Referrals" meta={`${formatCount(referrals.length)} records`} flush>
+              <Toolbar>
+                <ToolbarField label="Status">
+                  <select
+                    value={referralFilter.status}
+                    onChange={(event) => setReferralFilter({ ...referralFilter, status: event.target.value })}
+                  >
+                    <option value="">All statuses</option>
+                    {referralStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {status.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                </ToolbarField>
+                <ToolbarField label="Search referred member" hideLabel>
+                  <input
+                    type="search"
+                    placeholder="Search referred member"
+                    value={referralFilter.search}
+                    onChange={(event) => setReferralFilter({ ...referralFilter, search: event.target.value })}
+                  />
+                </ToolbarField>
+                <ToolbarEnd>
+                  <button className="btn btn-sm" type="button" onClick={() => void reload()}>
+                    Apply
+                  </button>
+                </ToolbarEnd>
+              </Toolbar>
+
+              <DataTable
+                head={
+                  <tr>
+                    <th>Referred member</th>
+                    <th>Status</th>
+                    <th>Referrer</th>
+                    <th>Registered</th>
+                  </tr>
+                }
+              >
+                {referrals.length === 0 ? (
+                  <EmptyRow colSpan={4}>No referrals match this filter.</EmptyRow>
+                ) : (
+                  referrals.slice(0, 25).map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.referredName}</td>
+                      <td>
+                        <StatusPill status={item.status} />
+                      </td>
+                      <td>{item.referrerName}</td>
+                      <td className="muted-text">{new Date(item.registeredAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))
+                )}
+              </DataTable>
+            </Panel>
+
+            <Panel title="Strength and targets" flush>
+              <Toolbar>
+                <ToolbarField label="Territory type">
+                  <select
+                    value={territory.territoryType}
+                    onChange={(event) => setTerritory({ ...territory, territoryType: event.target.value })}
+                  >
+                    {territoryTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                </ToolbarField>
+                <ToolbarField label="Territory ID" hideLabel>
+                  <input
+                    type="text"
+                    placeholder="Territory ID"
+                    value={territory.territoryId}
+                    onChange={(event) => setTerritory({ ...territory, territoryId: event.target.value })}
+                  />
+                </ToolbarField>
+                <ToolbarEnd>
+                  <button className="btn btn-sm" type="button" onClick={() => void reload()}>
+                    Load
+                  </button>
+                </ToolbarEnd>
+              </Toolbar>
+
+              <div className="panel-body stack-4">
+                {isSuperAdmin ? (
+                  <form className="form-grid" onSubmit={handleStrengthConfigure}>
+                    <Field label="Metric" hint="The strength measure this target applies to.">
+                      <input
+                        value={targetForm.metric}
+                        onChange={(event) => setTargetForm({ ...targetForm, metric: event.target.value })}
+                        required
+                      />
+                    </Field>
+                    <Field label="Target value" hint="The figure the territory is working towards.">
+                      <input
+                        inputMode="numeric"
+                        value={targetForm.targetValue}
+                        onChange={(event) => setTargetForm({ ...targetForm, targetValue: event.target.value })}
+                        required
+                      />
+                    </Field>
+                    <div className="btn-row">
+                      <button className="btn" type="submit">
+                        Save target and recalculate
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                <DataTable
+                  caption="Target progress"
+                  head={
+                    <tr>
+                      <th>Metric</th>
+                      <th className="numeric">Actual</th>
+                      <th className="numeric">Target</th>
+                      <th className="numeric">Achieved</th>
+                      <th className="numeric">Shortfall</th>
+                    </tr>
+                  }
+                >
+                  {!strengthDashboard?.targetProgress.length ? (
+                    <EmptyRow colSpan={5}>No targets set for this territory.</EmptyRow>
+                  ) : (
+                    strengthDashboard.targetProgress.map((target) => (
+                      <tr key={target.targetId}>
+                        <td>{target.metric.replace(/_/g, " ").toLowerCase()}</td>
+                        <td className="numeric">{target.actualValue}</td>
+                        <td className="numeric">{target.targetValue}</td>
+                        <td className="numeric">{target.percentageAchieved}%</td>
+                        <td className="numeric">{target.shortfall}</td>
+                      </tr>
+                    ))
+                  )}
+                </DataTable>
+
+                <DataTable
+                  caption="Coordinator performance"
+                  head={
+                    <tr>
+                      <th>Coordinator</th>
+                      <th>Level</th>
+                      <th className="numeric">Verified referrals</th>
+                      <th className="numeric">Points</th>
+                    </tr>
+                  }
+                >
+                  {!strengthDashboard?.coordinatorPerformance.length ? (
+                    <EmptyRow colSpan={4}>No coordinator activity in this territory.</EmptyRow>
+                  ) : (
+                    strengthDashboard.coordinatorPerformance.slice(0, 10).map((item) => (
+                      <tr key={item.userId}>
+                        <td>{item.name}</td>
+                        <td className="muted-text">{item.level.replace(/_/g, " ").toLowerCase()}</td>
+                        <td className="numeric">{formatCount(item.directVerifiedRegistrations)}</td>
+                        <td className="numeric">{formatCount(item.confirmedPoints)}</td>
+                      </tr>
+                    ))
+                  )}
+                </DataTable>
+              </div>
+            </Panel>
+          </PanelGrid>
+        ) : null}
+
+        {isSuperAdmin ? (
+          <PanelGrid>
+            <Panel title="Reward rules">
+              <form className="form-grid stack-3" onSubmit={handleRewardRuleSubmit}>
+                <Field label="Rule name" hint="How this rule is identified in the audit trail.">
+                  <input
+                    value={rewardRuleForm.name}
+                    onChange={(event) => setRewardRuleForm({ ...rewardRuleForm, name: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Direct points" hint="Points minted for each qualifying action under this rule.">
+                  <input
+                    inputMode="numeric"
+                    value={rewardRuleForm.directPoints}
+                    onChange={(event) => setRewardRuleForm({ ...rewardRuleForm, directPoints: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Eligible coordinator level" hint="Leave unset to apply at every level.">
+                  <select
+                    value={rewardRuleForm.eligibleCoordinatorLevel}
+                    onChange={(event) =>
+                      setRewardRuleForm({ ...rewardRuleForm, eligibleCoordinatorLevel: event.target.value })
+                    }
+                  >
+                    <option value="">Any coordinator level</option>
+                    {["SENATORIAL_DISTRICT", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "WARD", "POLLING_UNIT"].map(
+                      (level) => (
+                        <option key={level} value={level}>
+                          {level.replace(/_/g, " ").toLowerCase()}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </Field>
+                <div className="btn-row">
+                  <button className="btn btn-primary" type="submit">
+                    Create reward rule
+                  </button>
                 </div>
-                {item.history.length ? <p className="muted">Latest history: {item.history[0].decision} at {new Date(item.history[0].createdAt).toLocaleString()}</p> : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {referrals.length || canViewStrength ? (
-        <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-          <section className="panel card">
-            <h2>Referral Dashboard</h2>
-            <div className="map-filter-row" style={{ marginBottom: 16 }}>
-              <select value={referralFilter.status} onChange={(event) => setReferralFilter({ ...referralFilter, status: event.target.value })}>
-                <option value="">All statuses</option>
-                {referralStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
-              <input placeholder="Search referred member" value={referralFilter.search} onChange={(event) => setReferralFilter({ ...referralFilter, search: event.target.value })} />
-              <button className="button secondary" type="button" onClick={() => void reload()}>Apply</button>
-            </div>
-            <div className="badge-row" style={{ marginBottom: 16 }}>
-              {Object.entries(referralSummary).map(([label, count]) => <span key={label} className="status-badge live">{label}: {count}</span>)}
-            </div>
-            <div className="reward-list">
-              {referrals.slice(0, 10).map((item) => (
-                <article key={item.id} className="reward-item">
-                  <strong>{item.referredName}</strong>
-                  <p>{item.status} via {item.referrerName}</p>
-                  <p className="muted">Registered {new Date(item.registeredAt).toLocaleString()}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel card">
-            <h2>Strength, Targets, Performance</h2>
-            <div className="map-filter-row" style={{ marginBottom: 16 }}>
-              <select value={territory.territoryType} onChange={(event) => setTerritory({ ...territory, territoryType: event.target.value })}>
-                {territoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
-              <input value={territory.territoryId} onChange={(event) => setTerritory({ ...territory, territoryId: event.target.value })} />
-              <button className="button secondary" type="button" onClick={() => void reload()}>Load</button>
-            </div>
-            {isSuperAdmin ? (
-              <form className="form" onSubmit={handleStrengthConfigure} style={{ marginBottom: 16 }}>
-                <input value={targetForm.metric} onChange={(event) => setTargetForm({ ...targetForm, metric: event.target.value })} />
-                <input value={targetForm.targetValue} onChange={(event) => setTargetForm({ ...targetForm, targetValue: event.target.value })} />
-                <button className="button secondary" type="submit">Save target and calculate</button>
               </form>
+
+              <DataTable
+                caption="Active rules"
+                head={
+                  <tr>
+                    <th>Rule</th>
+                    <th>Applies to</th>
+                    <th className="numeric">Points</th>
+                  </tr>
+                }
+              >
+                {rewardRules.length === 0 ? (
+                  <EmptyRow colSpan={3}>No reward rules defined.</EmptyRow>
+                ) : (
+                  rewardRules.slice(0, 8).map((rule) => (
+                    <tr key={rule.id}>
+                      <td>{rule.name}</td>
+                      <td className="muted-text">
+                        {rule.eligibleRole.replace(/_/g, " ").toLowerCase()} ·{" "}
+                        {(rule.eligibleCoordinatorLevel || "ALL").replace(/_/g, " ").toLowerCase()}
+                      </td>
+                      <td className="numeric">{formatCount(rule.versions[0]?.directPoints ?? 0)}</td>
+                    </tr>
+                  ))
+                )}
+              </DataTable>
+            </Panel>
+
+            <Panel title="Payout policy" meta="Governs what a point is worth">
+              <form className="form-grid stack-3" onSubmit={handlePayoutConfigSubmit}>
+                <Field
+                  label="Minimum points"
+                  hint="A beneficiary below this threshold is not included in a payout batch."
+                >
+                  <input
+                    inputMode="numeric"
+                    value={payoutConfigForm.minimumPoints}
+                    onChange={(event) => setPayoutConfigForm({ ...payoutConfigForm, minimumPoints: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field
+                  label="Point conversion rate"
+                  hint="Naira paid per point. This figure decides what every beneficiary receives."
+                >
+                  <input
+                    inputMode="decimal"
+                    value={payoutConfigForm.pointConversionRate}
+                    onChange={(event) =>
+                      setPayoutConfigForm({ ...payoutConfigForm, pointConversionRate: event.target.value })
+                    }
+                    required
+                  />
+                </Field>
+                <Field label="Frequency" hint="How often a cycle opens.">
+                  <select
+                    value={payoutConfigForm.frequency}
+                    onChange={(event) => setPayoutConfigForm({ ...payoutConfigForm, frequency: event.target.value })}
+                  >
+                    {["WEEKLY", "BIWEEKLY", "MONTHLY"].map((option) => (
+                      <option key={option} value={option}>
+                        {option.toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div className="btn-row">
+                  <button className="btn" type="submit">
+                    Save payout policy
+                  </button>
+                </div>
+              </form>
+            </Panel>
+
+            <Panel title="Payout cycle">
+              <form className="form-grid stack-3" onSubmit={handlePayoutCycleSubmit}>
+                <Field label="Cycle name">
+                  <input
+                    value={payoutCycleForm.name}
+                    onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, name: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Opens at">
+                  <input
+                    type="datetime-local"
+                    value={payoutCycleForm.opensAt}
+                    onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, opensAt: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Closes at">
+                  <input
+                    type="datetime-local"
+                    value={payoutCycleForm.closesAt}
+                    onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, closesAt: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Payout date">
+                  <input
+                    type="datetime-local"
+                    value={payoutCycleForm.payoutDate}
+                    onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, payoutDate: event.target.value })}
+                    required
+                  />
+                </Field>
+                <div className="btn-row">
+                  <button className="btn" type="submit">
+                    Create cycle
+                  </button>
+                </div>
+              </form>
+            </Panel>
+
+            <Panel title="Batching" meta={`${formatCount(payoutEligibility.length)} eligible`}>
+              <form className="form-grid stack-3" onSubmit={handlePayoutBatchSubmit}>
+                <Field label="Payout cycle">
+                  <select
+                    value={payoutBatchForm.cycleId}
+                    onChange={(event) => setPayoutBatchForm({ ...payoutBatchForm, cycleId: event.target.value })}
+                    required
+                  >
+                    <option value="">Select cycle</option>
+                    {payoutCycles.map((cycle) => (
+                      <option key={cycle.id} value={cycle.id}>
+                        {cycle.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Payout officer" hint="The officer who will process this batch.">
+                  <select
+                    value={payoutBatchForm.payoutOfficerUserId}
+                    onChange={(event) =>
+                      setPayoutBatchForm({ ...payoutBatchForm, payoutOfficerUserId: event.target.value })
+                    }
+                    required
+                  >
+                    <option value="">Select payout officer</option>
+                    {payoutOfficers.map((officer) => (
+                      <option key={officer.id} value={officer.id}>
+                        {officer.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div className="btn-row">
+                  <button className="btn btn-primary" type="submit" disabled={!payoutEligibility.length}>
+                    Create batch for eligible beneficiaries
+                  </button>
+                </div>
+              </form>
+
+              <DataTable
+                caption="Eligible beneficiaries — amounts are derived by the payout authority, not entered"
+                head={
+                  <tr>
+                    <th>Beneficiary</th>
+                    <th className="numeric">Points</th>
+                    <th className="numeric">Amount</th>
+                  </tr>
+                }
+              >
+                {payoutEligibility.length === 0 ? (
+                  <EmptyRow colSpan={3}>No beneficiary currently meets the active threshold.</EmptyRow>
+                ) : (
+                  payoutEligibility.slice(0, 15).map((item) => (
+                    <tr key={item.userId}>
+                      <td>
+                        {item.name || item.userId}
+                        {item.email ? <div className="muted-text">{item.email}</div> : null}
+                      </td>
+                      <td className="numeric">{formatCount(item.availablePoints)}</td>
+                      <td className="numeric">
+                        <Money amount={item.amount} provenance="revalued" />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </DataTable>
+            </Panel>
+          </PanelGrid>
+        ) : null}
+
+        {isSuperAdmin || isPayoutOfficer ? (
+          <Panel
+            title="Payout processing"
+            meta="Payout officers process only assigned records and cannot change reward or payout policy"
+            actions={
+              <button className="btn btn-sm" type="button" onClick={() => void reload()}>
+                Refresh
+              </button>
+            }
+            flush
+          >
+            <Toolbar>
+              <ToolbarField label="Status">
+                <select value={payoutStatus} onChange={(event) => setPayoutStatus(event.target.value)}>
+                  <option value="">All statuses</option>
+                  {payoutStatuses.map((status) => (
+                    <option key={status} value={status}>
+                      {status.toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </ToolbarField>
+            </Toolbar>
+
+            {payoutExecutionEnabled === false || payoutMessage || payoutProblem ? (
+              <div className="panel-body stack-2">
+                {payoutExecutionEnabled === false ? (
+                  <Notice tone="refused" title="Payout execution is disabled">
+                    <span>
+                      No payment can complete while PAYOUT_EXECUTION_ENABLED is false. This is the default in every
+                      environment, production included, and is cleared only by a deliberate operator action.
+                    </span>
+                  </Notice>
+                ) : null}
+                {payoutMessage ? <Notice tone="ok" title={payoutMessage} /> : null}
+                {payoutProblem ? (
+                  <Notice tone={payoutProblem.refused ? "refused" : "error"} title={payoutProblem.title}>
+                    <span>{payoutProblem.detail}</span>
+                    {payoutProblem.nextStep ? <span className="muted-text">{payoutProblem.nextStep}</span> : null}
+                  </Notice>
+                ) : null}
+              </div>
             ) : null}
-            {strengthDashboard?.targetProgress.map((target) => (
-              <article key={target.targetId} className="reward-item">
-                <strong>{target.metric}</strong>
-                <p>{target.actualValue} / {target.targetValue} ({target.percentageAchieved}%)</p>
-                <p className="muted">Shortfall: {target.shortfall}</p>
-              </article>
-            ))}
-            <h3>Coordinator Performance</h3>
-            <div className="reward-list">
-              {strengthDashboard?.coordinatorPerformance.slice(0, 8).map((item) => (
-                <article key={item.userId} className="reward-item">
-                  <strong>{item.name}</strong>
-                  <p>{item.level} | Verified referrals: {item.directVerifiedRegistrations} | Points: {item.confirmedPoints}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </section>
-      ) : null}
 
-      {isSuperAdmin ? (
-        <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-          <section className="panel card">
-            <h2>Reward Configuration</h2>
-            <form className="form" onSubmit={handleRewardRuleSubmit}>
-              <input value={rewardRuleForm.name} onChange={(event) => setRewardRuleForm({ ...rewardRuleForm, name: event.target.value })} />
-              <input value={rewardRuleForm.directPoints} onChange={(event) => setRewardRuleForm({ ...rewardRuleForm, directPoints: event.target.value })} />
-              <select value={rewardRuleForm.eligibleCoordinatorLevel} onChange={(event) => setRewardRuleForm({ ...rewardRuleForm, eligibleCoordinatorLevel: event.target.value })}>
-                <option value="">Any coordinator level</option>
-                {["SENATORIAL_DISTRICT", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "WARD", "POLLING_UNIT"].map((level) => <option key={level} value={level}>{level}</option>)}
-              </select>
-              <button className="button" type="submit">Create reward rule</button>
-            </form>
-            <div className="reward-list" style={{ marginTop: 16 }}>
-              {rewardRules.slice(0, 5).map((rule) => (
-                <article key={rule.id} className="reward-item">
-                  <strong>{rule.name}</strong>
-                  <p>{rule.eligibleRole} {rule.eligibleCoordinatorLevel || "ALL"} | {rule.versions[0]?.directPoints ?? 0} points</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel card">
-            <h2>Payout Setup</h2>
-            <form className="form" onSubmit={handlePayoutConfigSubmit}>
-              <input value={payoutConfigForm.minimumPoints} onChange={(event) => setPayoutConfigForm({ ...payoutConfigForm, minimumPoints: event.target.value })} />
-              <input value={payoutConfigForm.pointConversionRate} onChange={(event) => setPayoutConfigForm({ ...payoutConfigForm, pointConversionRate: event.target.value })} />
-              <input value={payoutConfigForm.frequency} onChange={(event) => setPayoutConfigForm({ ...payoutConfigForm, frequency: event.target.value })} />
-              <button className="button secondary" type="submit">Save payout policy</button>
-            </form>
-            <form className="form" onSubmit={handlePayoutCycleSubmit} style={{ marginTop: 16 }}>
-              <input value={payoutCycleForm.name} onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, name: event.target.value })} />
-              <input type="datetime-local" value={payoutCycleForm.opensAt} onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, opensAt: event.target.value })} />
-              <input type="datetime-local" value={payoutCycleForm.closesAt} onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, closesAt: event.target.value })} />
-              <input type="datetime-local" value={payoutCycleForm.payoutDate} onChange={(event) => setPayoutCycleForm({ ...payoutCycleForm, payoutDate: event.target.value })} />
-              <button className="button secondary" type="submit">Create cycle</button>
-            </form>
-          </section>
-
-          <section className="panel card">
-            <h2>Payout Batching</h2>
-            <form className="form" onSubmit={handlePayoutBatchSubmit}>
-              <select value={payoutBatchForm.cycleId} onChange={(event) => setPayoutBatchForm({ ...payoutBatchForm, cycleId: event.target.value })} required>
-                <option value="">Select cycle</option>
-                {payoutCycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
-              </select>
-              <select value={payoutBatchForm.payoutOfficerUserId} onChange={(event) => setPayoutBatchForm({ ...payoutBatchForm, payoutOfficerUserId: event.target.value })} required>
-                <option value="">Select payout officer</option>
-                {payoutOfficers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}
-              </select>
-              <button className="button" type="submit" disabled={!payoutEligibility.length}>Create batch for eligible users</button>
-            </form>
-            <p className="muted">{payoutEligibility.length} eligible beneficiaries currently meet the active threshold.</p>
-          </section>
-        </section>
-      ) : null}
-
-      {isSuperAdmin || isPayoutOfficer ? (
-        <section className="panel card" style={{ marginTop: 24 }}>
-          <div className="section-head">
-            <div>
-              <h2>Payout Processing</h2>
-              <p className="muted">Payout officers can process only assigned records and cannot change rewards or payout policy.</p>
-            </div>
-            <select value={payoutStatus} onChange={(event) => setPayoutStatus(event.target.value)}>
-              <option value="">All statuses</option>
-              {payoutStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-          </div>
-          <button className="button secondary" type="button" onClick={() => void reload()}>Refresh payouts</button>
-          {payoutExecutionEnabled === false ? (
-            <div style={{ marginTop: 12 }}>
-              <Notice tone="refused" title="Payout execution is disabled">
-                <span>
-                  No payment can complete while PAYOUT_EXECUTION_ENABLED is false. This is the default in every
-                  environment, production included, and is cleared only by a deliberate operator action.
-                </span>
-              </Notice>
-            </div>
-          ) : null}
-          {payoutMessage ? (
-            <div style={{ marginTop: 12 }}>
-              <Notice tone="ok" title={payoutMessage} />
-            </div>
-          ) : null}
-          {payoutProblem ? (
-            <div style={{ marginTop: 12 }}>
-              <Notice tone={payoutProblem.refused ? "refused" : "error"} title={payoutProblem.title}>
-                <span>{payoutProblem.detail}</span>
-                {payoutProblem.nextStep ? <span className="muted-text">{payoutProblem.nextStep}</span> : null}
-              </Notice>
-            </div>
-          ) : null}
-          <div style={{ marginTop: 16 }}>
             <DataTable
               head={
                 <tr>
@@ -556,9 +967,10 @@ export default function AdminPreElectionPage() {
                 </tr>
               }
             >
-              {(isPayoutOfficer ? payoutAssignments : payoutBatches.flatMap((batch) => batch.assignments))
-                .slice(0, 50)
-                .map((assignment) => {
+              {assignmentRows.length === 0 ? (
+                <EmptyRow colSpan={6}>No payout assignments to process.</EmptyRow>
+              ) : (
+                assignmentRows.map((assignment) => {
                   const execution = assignment.transactions?.[0];
                   return (
                     <tr key={assignment.id}>
@@ -624,59 +1036,82 @@ export default function AdminPreElectionPage() {
                       </td>
                     </tr>
                   );
-                })}
+                })
+              )}
             </DataTable>
-          </div>
 
-          <PaymentReferenceDialog
-            open={payingAssignment !== null}
-            busy={payoutBusy !== null}
-            title="Record payout payment"
-            summary={
-              payingAssignment ? (
-                <>
-                  {payingAssignment.beneficiaryName || payingAssignment.beneficiaryUserId} ·{" "}
-                  {formatCount(payingAssignment.points)} points · {formatMoney(payingAssignment.amount)}. The reference
-                  is written to an immutable execution record and may identify only this payment.
-                </>
-              ) : null
-            }
-            onCancel={() => setPayingAssignment(null)}
-            onConfirm={(input) => {
-              const target = payingAssignment;
-              if (!target) return;
-              void runPayout(`paid-${target.id}`, async (activeToken) => {
-                await updatePreElectionPayoutAssignment(activeToken, target.id, { status: "PAID", ...input });
-                setPayingAssignment(null);
-                return "Payment recorded.";
-              });
-            }}
-          />
-          {isSuperAdmin ? (
-            <div className="reward-list" style={{ marginTop: 16 }}>
-              {payoutBatches.map((batch) => (
-                <article key={batch.id} className="reward-item">
-                  <strong>{batch.payoutCycleName || batch.payoutCycleId}</strong>
-                  <p>{batch.status} | {batch.assignmentCount} assignments | NGN {batch.totalAmount}</p>
-                  <button
-                    className="btn btn-sm"
-                    type="button"
-                    disabled={payoutBusy !== null}
-                    onClick={() =>
-                      void runPayout(`batch-${batch.id}`, async (activeToken) => {
-                        await approvePreElectionPayoutBatch(activeToken, batch.id);
-                        return "Batch approved.";
-                      })
-                    }
-                  >
-                    Approve batch
-                  </button>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+            <PaymentReferenceDialog
+              open={payingAssignment !== null}
+              busy={payoutBusy !== null}
+              title="Record payout payment"
+              summary={
+                payingAssignment ? (
+                  <>
+                    {payingAssignment.beneficiaryName || payingAssignment.beneficiaryUserId} ·{" "}
+                    {formatCount(payingAssignment.points)} points · {formatMoney(payingAssignment.amount)}. The reference
+                    is written to an immutable execution record and may identify only this payment.
+                  </>
+                ) : null
+              }
+              onCancel={() => setPayingAssignment(null)}
+              onConfirm={(input) => {
+                const target = payingAssignment;
+                if (!target) return;
+                void runPayout(`paid-${target.id}`, async (activeToken) => {
+                  await updatePreElectionPayoutAssignment(activeToken, target.id, { status: "PAID", ...input });
+                  setPayingAssignment(null);
+                  return "Payment recorded.";
+                });
+              }}
+            />
+
+            {isSuperAdmin ? (
+              <DataTable
+                caption="Batches"
+                head={
+                  <tr>
+                    <th>Cycle</th>
+                    <th>Status</th>
+                    <th className="numeric">Assignments</th>
+                    <th className="numeric">Total</th>
+                    <th className="actions">Action</th>
+                  </tr>
+                }
+              >
+                {payoutBatches.length === 0 ? (
+                  <EmptyRow colSpan={5}>No payout batches created.</EmptyRow>
+                ) : (
+                  payoutBatches.map((batch) => (
+                    <tr key={batch.id}>
+                      <td>{batch.payoutCycleName || batch.payoutCycleId}</td>
+                      <td>
+                        <StatusPill status={batch.status} />
+                      </td>
+                      <td className="numeric">{formatCount(batch.assignmentCount)}</td>
+                      <td className="numeric">{formatMoney(batch.totalAmount)}</td>
+                      <td className="actions">
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          disabled={payoutBusy !== null}
+                          onClick={() =>
+                            void runPayout(`batch-${batch.id}`, async (activeToken) => {
+                              await approvePreElectionPayoutBatch(activeToken, batch.id);
+                              return "Batch approved.";
+                            })
+                          }
+                        >
+                          Approve batch
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </DataTable>
+            ) : null}
+          </Panel>
+        ) : null}
+      </div>
     </main>
   );
 }

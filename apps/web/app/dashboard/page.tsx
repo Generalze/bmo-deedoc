@@ -33,6 +33,23 @@ import {
   submitMyPreElectionVerificationDocument,
 } from "../../lib/api";
 import type { PreElectionVerificationCase } from "../../lib/api";
+import {
+  DataTable,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  Money,
+  Notice,
+  PageHead,
+  Panel,
+  PanelGrid,
+  StateView,
+  StatusPill,
+  Toolbar,
+  formatCount,
+  formatMoney,
+} from "../../components/ui";
 import { clearSession, readSession } from "../../lib/session";
 
 async function sha256File(file: File) {
@@ -273,324 +290,436 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <h1>Loading voter dashboard...</h1>
-          <p>Please wait while your account data is being prepared.</p>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Your dashboard" />
+        <StateView kind="loading" title="Preparing your account…" />
       </main>
     );
   }
 
   if (!user || !rewards || !balance) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load dashboard</h1>
-          <p className="error">{error || "Authentication is required."}</p>
-          <p>
-            <Link href="/login">Return to login</Link>
-          </p>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Your dashboard" />
+        <StateView
+          kind="error"
+          title="Unable to load your dashboard"
+          detail={error || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Return to sign in
+            </Link>
+          }
+        />
       </main>
     );
   }
 
+  /**
+   * The one number a member can actually spend.
+   *
+   * The API reports `availablePoints` and `payablePoints` as the same figure —
+   * confirmed points less what is already reserved — and deliberately keeps
+   * migrated legacy value out of it. Everything else on this screen is context
+   * for that number, so only it is rendered at full size.
+   */
+  const availablePoints = preElectionBalance?.availablePoints ?? balance.availablePoints;
+  const legacyPending = balance.legacyCarryoverPendingPoints;
+
   return (
-    <main className="shell">
-      <section className="panel hero voter-hero">
-        <div>
-          <p className="eyebrow">Grassroots participation</p>
-          <h1>Welcome, {user.name}</h1>
-          <p>
-            Your referral code is <strong>{user.voterProfile?.referralCode}</strong>.
-          </p>
-        </div>
-        <div className="action-row">
-          <div className="hero-callout">
-            <strong>{events.length}</strong>
-            <span>live events in your territory</span>
-          </div>
-          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+    <main className="console-shell">
+      <PageHead
+        title={`Welcome, ${user.name}`}
+        lead={
+          user.voterProfile?.referralCode ? (
+            <>
+              Your referral code is <strong>{user.voterProfile.referralCode}</strong>.
+            </>
+          ) : undefined
+        }
+        actions={
+          <button className="btn" type="button" onClick={() => void handleLogout()}>
             Sign out
           </button>
-        </div>
-      </section>
+        }
+      />
 
-      <section className="grid stats">
-        <article className="panel card">
-          <h2>Confirmed Points</h2>
-          <div className="value">{preElectionBalance?.confirmedPoints ?? rewards.totalPoints}</div>
-        </article>
-        <article className="panel card">
-          <h2>Pending Potential</h2>
-          <div className="value">{preElectionBalance?.pendingPotentialPoints ?? 0}</div>
-        </article>
-        <article className="panel card">
-          <h2>Reserved Payout</h2>
-          <div className="value">{preElectionBalance?.reservedPayoutPoints ?? balance.reservedPoints}</div>
-          {preElectionBalance?.preCutoverReservedPoints ? (
-            <p className="muted">
-              Includes {preElectionBalance.preCutoverReservedPoints} points claimed before the legacy cutover.
-              Those are held against your balance and are not payable until reconciliation is settled.
-            </p>
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Something went wrong">{error}</Notice> : null}
+        {message ? <Notice tone="ok" title={message} /> : null}
+
+        <KpiRow>
+          <Kpi
+            label="Available to redeem"
+            value={formatCount(availablePoints)}
+            note="Confirmed points less anything already reserved"
+            tone="accent"
+          />
+          <Kpi label="Confirmed" value={formatCount(preElectionBalance?.confirmedPoints ?? rewards.totalPoints)} note="Posted to your ledger" />
+          <Kpi
+            label="Pending potential"
+            value={formatCount(preElectionBalance?.pendingPotentialPoints ?? 0)}
+            note="Not yet earned"
+          />
+          <Kpi
+            label="Reserved"
+            value={formatCount(preElectionBalance?.reservedPayoutPoints ?? balance.reservedPoints)}
+            note={
+              preElectionBalance?.preCutoverReservedPoints
+                ? `Includes ${formatCount(preElectionBalance.preCutoverReservedPoints)} claimed before the legacy cutover`
+                : "Held against a redemption or payout"
+            }
+            tone={preElectionBalance?.preCutoverReservedPoints ? "warn" : undefined}
+          />
+          {legacyPending > 0 ? (
+            <Kpi
+              label="Preserved legacy"
+              value={
+                <>
+                  {formatCount(legacyPending)}{" "}
+                  <span className="pill pill-legacy">Not payable</span>
+                </>
+              }
+              note="Becomes spendable only once an approved conversion rate is applied"
+              tone="warn"
+            />
           ) : null}
-        </article>
-        <article className="panel card">
-          <h2>Available Balance</h2>
-          <div className="value">{preElectionBalance?.availablePoints ?? balance.availablePoints}</div>
-        </article>
-        {balance.legacyCarryoverPendingPoints > 0 ? (
-          <article className="panel card">
-            <h2>Preserved Legacy Balance</h2>
-            <div className="value">{balance.legacyCarryoverPendingPoints}</div>
-            <p className="muted">
-              Carried over and preserved for you. Not yet payable — it becomes spendable only once an
-              approved conversion rate is applied.
+        </KpiRow>
+
+        <Panel
+          title="Voter verification"
+          meta={<StatusPill status={verification?.status || "NOT_SUBMITTED"} />}
+        >
+          <div className="stack-3">
+            <p className="muted-text">
+              Voter-registration verification gates referral rewards. Rewards never depend on vote choice, ballot
+              proof, or proof of voting for any candidate.
             </p>
-          </article>
-        ) : null}
-      </section>
 
-      {error ? <p className="error" style={{ marginTop: 16 }}>{error}</p> : null}
-      {message ? <p className="feedback-banner success" style={{ marginTop: 16 }}>{message}</p> : null}
+            {verification?.reviewNote ? (
+              <Notice tone="legacy" title="Reviewer note">
+                <span>{verification.reviewNote}</span>
+              </Notice>
+            ) : null}
+            {verification?.isFlagged ? (
+              <Notice tone="error" title="Flagged for review">
+                <span>{verification.fraudReason || "Additional validator review required."}</span>
+              </Notice>
+            ) : null}
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Voter Verification</h2>
-            <p className="muted">
-              Voter-registration verification gates referral rewards. Rewards never depend on vote choice, ballot proof, or proof of voting for any candidate.
-            </p>
-          </div>
-          <span className={`status-pill ${verification?.status === "VERIFIED" ? "active" : verification?.status === "REJECTED" ? "inactive" : ""}`}>
-            {verification?.status || "NOT_SUBMITTED"}
-          </span>
-        </div>
-
-        {verification?.reviewNote ? <p className="muted">Latest reviewer note: {verification.reviewNote}</p> : null}
-        {verification?.isFlagged ? <p className="error">Flagged for review: {verification.fraudReason || "Additional validator review required."}</p> : null}
-
-        {verification && ["NOT_SUBMITTED", "RESUBMISSION_REQUIRED", "PENDING"].includes(verification.status) ? (
-          <form className="form" onSubmit={handleVerificationDocumentSubmit} style={{ marginBottom: 18 }}>
-            <label className="field">
-              <span>{verification.status === "RESUBMISSION_REQUIRED" ? "Resubmit Voter Evidence" : "Submit Voter Evidence"}</span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,application/pdf"
-                onChange={(event) => setVerificationDocument(event.target.files?.[0] || null)}
-              />
-              <small className="muted">Accepted formats: JPG, PNG, WebP, or PDF. Files are represented by private storage metadata.</small>
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={documentConsent}
-                onChange={(event) => setDocumentConsent(event.target.checked)}
-                required
-              />
-              <span>I consent to private processing of this voter-registration evidence by authorized validators.</span>
-            </label>
-            <button className="button secondary" type="submit" disabled={!verificationDocument || !documentConsent}>
-              Submit evidence
-            </button>
-          </form>
-        ) : null}
-
-        {verification?.history.length ? (
-          <div className="reward-list">
-            {verification.history.slice(0, 5).map((entry) => (
-              <article key={entry.id} className="reward-item">
-                <strong>{entry.decision}</strong>
-                <p>{entry.fromStatus || "NEW"} to {entry.toStatus}</p>
-                {entry.note ? <p className="muted">{entry.note}</p> : null}
-                <p className="muted">
-                  {new Date(entry.createdAt).toLocaleString()}
-                  {entry.actorName ? ` by ${entry.actorName}` : ""}
-                </p>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">No verification history is available yet.</p>
-        )}
-      </section>
-
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Upcoming campaign events</h2>
-            <p className="muted">RSVP to published rallies, ward meetings, town halls, and voter-mobilization activities in your territory.</p>
-          </div>
-          <Link href="/candidates">Browse candidates</Link>
-        </div>
-        {events.length === 0 ? (
-          <p className="muted">No published campaign events are currently visible in your territory.</p>
-        ) : (
-          <div className="campaign-event-grid">
-            {events.slice(0, 6).map((item) => (
-              <article key={item.id} className="campaign-event-card">
-                {item.coverImageUrl ? (
-                  <img src={item.coverImageUrl} alt={item.title} className="campaign-event-cover" />
-                ) : (
-                  <div className="campaign-event-cover fallback">Event</div>
-                )}
-                <div className="campaign-event-copy">
-                  <p className="eyebrow">{item.candidate?.name || "Campaign event"}</p>
-                  <h3>{item.title}</h3>
-                  <p>{item.description}</p>
-                  <p className="muted">{new Date(item.startsAt).toLocaleString()} | {item.venue}</p>
-                  <p className="muted">{item.territoryLabels.state || "National"}{item.territoryLabels.lga ? ` | ${item.territoryLabels.lga}` : ""}</p>
-                  <div className="action-row">
-                    <button className="button secondary" type="button" onClick={() => void handleEventRsvp(item.id, "INTERESTED")}>
-                      {item.rsvp?.status === "INTERESTED" ? "Interested" : "Mark interested"}
-                    </button>
-                    <button className="button" type="button" onClick={() => void handleEventRsvp(item.id, "GOING")}>
-                      {item.rsvp?.status === "GOING" ? "Going" : "RSVP going"}
-                    </button>
-                  </div>
+            {verification && ["NOT_SUBMITTED", "RESUBMISSION_REQUIRED", "PENDING"].includes(verification.status) ? (
+              <form className="stack-3" onSubmit={handleVerificationDocumentSubmit}>
+                <Field
+                  label={verification.status === "RESUBMISSION_REQUIRED" ? "Resubmit voter evidence" : "Submit voter evidence"}
+                  hint="JPG, PNG, WebP or PDF. Files are held as private storage metadata."
+                >
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    onChange={(event) => setVerificationDocument(event.target.files?.[0] || null)}
+                  />
+                </Field>
+                <label className="cluster">
+                  <input
+                    type="checkbox"
+                    checked={documentConsent}
+                    onChange={(event) => setDocumentConsent(event.target.checked)}
+                    required
+                  />
+                  <span>I consent to private processing of this voter-registration evidence by authorised validators.</span>
+                </label>
+                <div className="btn-row">
+                  <button className="btn btn-primary" type="submit" disabled={!verificationDocument || !documentConsent}>
+                    Submit evidence
+                  </button>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+              </form>
+            ) : null}
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Optional Engagement Tasks</h2>
-        {engagementTasks.length === 0 ? (
-          <p className="muted">No optional engagement tasks are active in your territory right now.</p>
-        ) : (
-          <div className="reward-list">
-            {engagementTasks.slice(0, 6).map((task) => (
-              <article key={task.id} className="reward-item">
-                <strong>{task.title}</strong>
-                <p>{task.description}</p>
-                <p className="muted">
-                  {task.type} | {task.progressCount}/{task.targetCount || 1} | {task.rewardPoints} points
-                </p>
-                <button className="button secondary" type="button" disabled={!task.completed || task.claimed} onClick={() => void handleClaimTask(task.id)}>
-                  {task.claimed ? "Claimed" : task.completed ? "Claim task" : "In progress"}
+            <DataTable
+              caption="Verification history"
+              head={
+                <tr>
+                  <th>Decision</th>
+                  <th>Transition</th>
+                  <th>Note</th>
+                  <th>When</th>
+                </tr>
+              }
+            >
+              {!verification?.history.length ? (
+                <EmptyRow colSpan={4}>No verification history yet.</EmptyRow>
+              ) : (
+                verification.history.slice(0, 5).map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{entry.decision}</td>
+                    <td className="muted-text">
+                      {entry.fromStatus || "NEW"} → {entry.toStatus}
+                    </td>
+                    <td className="muted-text">{entry.note || "—"}</td>
+                    <td className="muted-text">
+                      {new Date(entry.createdAt).toLocaleString()}
+                      {entry.actorName ? ` · ${entry.actorName}` : ""}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </div>
+        </Panel>
+
+        <PanelGrid>
+          <Panel title="Request redemption" meta={`${formatCount(availablePoints)} available`}>
+            <form className="stack-3" onSubmit={handleRedemptionSubmit}>
+              <Field
+                label="Points requested"
+                hint={
+                  legacyPending > 0
+                    ? `You may request up to ${formatCount(availablePoints)}. Your preserved legacy balance is not included and cannot be redeemed yet.`
+                    : `You may request up to ${formatCount(availablePoints)}.`
+                }
+              >
+                <input
+                  inputMode="numeric"
+                  max={availablePoints}
+                  min={1}
+                  value={form.pointsRequested}
+                  onChange={(event) => setForm({ ...form, pointsRequested: event.target.value })}
+                  required
+                />
+              </Field>
+              {/* No amount field. The payable value is computed by the server
+                  from the member's balance and the configured conversion rate;
+                  asking the payee to state it invited the client to be
+                  authoritative for money. */}
+              <Field label="Note" hint="Optional.">
+                <input value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
+              </Field>
+              <div className="btn-row">
+                <button className="btn btn-primary" type="submit" disabled={availablePoints <= 0}>
+                  Submit redemption
                 </button>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+              </div>
+            </form>
+          </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Reward history</h2>
-            <p className="muted">Track posted points and each redemption review stage in one place.</p>
-          </div>
-          <span className="status-pill">{rewardHistory.length} entries</span>
-        </div>
-        {rewardHistory.length > 0 ? (
-          <div className="badge-row" style={{ marginBottom: 16 }}>
-            {Object.entries(rewardSourceBreakdown).slice(0, 6).map(([label, count]) => (
-              <span key={label} className="status-badge live">
-                {label}: {count}
+          <Panel title="Notifications" meta={formatCount(notifications.length)}>
+            {notifications.length === 0 ? (
+              <StateView kind="empty" title="No notifications yet" />
+            ) : (
+              <ul className="stack-3" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {notifications.slice(0, 5).map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.title}</strong>
+                    <p className="muted-text">{item.message}</p>
+                    <p className="muted-text">{new Date(item.createdAt).toLocaleString()}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </PanelGrid>
+
+        <Panel
+          title="Reward history"
+          meta={`${formatCount(rewardHistory.length)} entries`}
+          flush
+        >
+          {rewardHistory.length > 0 ? (
+            <Toolbar>
+              <span className="cluster">
+                {Object.entries(rewardSourceBreakdown)
+                  .slice(0, 6)
+                  .map(([label, count]) => (
+                    <span key={label} className="pill pill-stale">
+                      {label}: {count}
+                    </span>
+                  ))}
               </span>
-            ))}
-          </div>
-        ) : null}
-        {rewardHistory.length === 0 ? (
-          <p className="muted">No reward history is available yet.</p>
-        ) : (
-          <div className="reward-list">
-            {rewardHistory.slice(0, 8).map((entry) => (
-              <article key={`${entry.kind}-${entry.id}`} className="reward-item">
-                <strong>{entry.title}</strong>
-                <p>{entry.description}</p>
-                <p className="muted">
-                  {entry.kind === "EARNED" ? "Earned" : "Redemption"} | {entry.status} | {entry.points} points
-                </p>
-                {entry.amount !== null ? <p className="muted">Amount: {entry.amount}</p> : null}
-                <p className="muted">
-                  {new Date(entry.createdAt).toLocaleString()}
-                  {entry.reviewedAt ? ` | Reviewed ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
-                </p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+            </Toolbar>
+          ) : null}
+          <DataTable
+            head={
+              <tr>
+                <th>Entry</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th className="numeric">Points</th>
+                <th className="numeric">Amount</th>
+                <th>When</th>
+              </tr>
+            }
+          >
+            {rewardHistory.length === 0 ? (
+              <EmptyRow colSpan={6}>No reward history yet.</EmptyRow>
+            ) : (
+              rewardHistory.slice(0, 12).map((entry) => (
+                <tr key={`${entry.kind}-${entry.id}`}>
+                  <td>
+                    <strong>{entry.title}</strong>
+                    {entry.description ? <div className="muted-text">{entry.description}</div> : null}
+                  </td>
+                  <td className="muted-text">{entry.kind === "EARNED" ? "Earned" : "Redemption"}</td>
+                  <td>
+                    <StatusPill status={entry.status} />
+                  </td>
+                  <td className="numeric">{formatCount(entry.points)}</td>
+                  <td className="numeric">{entry.amount !== null ? formatMoney(entry.amount) : "—"}</td>
+                  <td className="muted-text">
+                    {new Date(entry.createdAt).toLocaleDateString()}
+                    {entry.reviewedAt ? ` · reviewed ${new Date(entry.reviewedAt).toLocaleDateString()}` : ""}
+                  </td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Request Redemption</h2>
-          <form className="form" onSubmit={handleRedemptionSubmit}>
-            <label className="field">
-              <span>Points Requested</span>
-              <input value={form.pointsRequested} onChange={(event) => setForm({ ...form, pointsRequested: event.target.value })} required />
-            </label>
-            {/* No amount field. The payable value is computed by the server
-                from the member's balance and the configured conversion rate;
-                asking the payee to state it invited the client to be
-                authoritative for money. */}
-            <label className="field">
-              <span>Note</span>
-              <input value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
-            </label>
-            {message ? <p className="muted">{message}</p> : null}
-            <button className="button" type="submit">Submit redemption</button>
-          </form>
-        </section>
+        <Panel title="Redemption history" meta={`${formatCount(redemptions.length)} requests`} flush>
+          <DataTable
+            head={
+              <tr>
+                <th>Status</th>
+                <th className="numeric">Points requested</th>
+                <th className="numeric">Payable amount</th>
+                <th>Requested</th>
+                <th>Review note</th>
+              </tr>
+            }
+          >
+            {redemptions.length === 0 ? (
+              <EmptyRow colSpan={5}>No redemption requests yet.</EmptyRow>
+            ) : (
+              redemptions.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <StatusPill status={item.status} />
+                  </td>
+                  <td className="numeric">{formatCount(item.pointsRequested)}</td>
+                  <td className="numeric">
+                    {item.amountRequested !== null ? (
+                      <Money amount={item.amountRequested} provenance="revalued" />
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="muted-text">{new Date(item.createdAt).toLocaleDateString()}</td>
+                  <td className="muted-text">{item.note || "—"}</td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
 
-        <section className="panel card">
-          <h2>Notifications</h2>
-          {notifications.length === 0 ? (
-            <p className="muted">No notifications yet.</p>
+        <Panel
+          title="Upcoming campaign events"
+          meta={`${formatCount(events.length)} in your territory`}
+          actions={
+            <Link className="btn btn-sm" href="/candidates">
+              Browse candidates
+            </Link>
+          }
+        >
+          {events.length === 0 ? (
+            <StateView kind="empty" title="No published events in your territory" />
           ) : (
-            <div className="reward-list">
-              {notifications.slice(0, 5).map((item) => (
-                <article key={item.id} className="reward-item">
-                  <strong>{item.title}</strong>
-                  <p>{item.message}</p>
-                  <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
+            <div className="campaign-event-grid">
+              {events.slice(0, 6).map((item) => (
+                <article key={item.id} className="campaign-event-card">
+                  {item.coverImageUrl ? (
+                    <img src={item.coverImageUrl} alt={item.title} className="campaign-event-cover" />
+                  ) : (
+                    <div className="campaign-event-cover fallback">Event</div>
+                  )}
+                  <div className="campaign-event-copy">
+                    <p className="eyebrow">{item.candidate?.name || "Campaign event"}</p>
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
+                    <p className="muted-text">
+                      {new Date(item.startsAt).toLocaleString()} · {item.venue}
+                    </p>
+                    <p className="muted-text">
+                      {item.territoryLabels.state || "Ogun State"}
+                      {item.territoryLabels.lga ? ` · ${item.territoryLabels.lga}` : ""}
+                    </p>
+                    <div className="btn-row">
+                      <button className="btn btn-sm" type="button" onClick={() => void handleEventRsvp(item.id, "INTERESTED")}>
+                        {item.rsvp?.status === "INTERESTED" ? "Interested" : "Mark interested"}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        type="button"
+                        onClick={() => void handleEventRsvp(item.id, "GOING")}
+                      >
+                        {item.rsvp?.status === "GOING" ? "Going" : "RSVP going"}
+                      </button>
+                    </div>
+                  </div>
                 </article>
               ))}
             </div>
           )}
-        </section>
-      </section>
+        </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Campaign Updates</h2>
-        {posts.length === 0 ? (
-          <p className="muted">No campaign updates are currently visible in your territory.</p>
-        ) : (
-          <div className="reward-list">
-            {posts.slice(0, 6).map((post) => (
-              <article key={post.id} className="reward-item">
-                <strong>{post.title}</strong>
-                <p>{post.content}</p>
-                <p className="muted">{new Date(post.createdAt).toLocaleString()}</p>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+        <PanelGrid wide>
+          <Panel title="Optional engagement tasks" flush>
+            <DataTable
+              head={
+                <tr>
+                  <th>Task</th>
+                  <th className="numeric">Progress</th>
+                  <th className="numeric">Points</th>
+                  <th className="actions">Action</th>
+                </tr>
+              }
+            >
+              {engagementTasks.length === 0 ? (
+                <EmptyRow colSpan={4}>No engagement tasks are active in your territory.</EmptyRow>
+              ) : (
+                engagementTasks.slice(0, 8).map((task) => (
+                  <tr key={task.id}>
+                    <td>
+                      <strong>{task.title}</strong>
+                      {task.description ? <div className="muted-text">{task.description}</div> : null}
+                      <div className="muted-text">{task.type.replace(/_/g, " ").toLowerCase()}</div>
+                    </td>
+                    <td className="numeric">
+                      {task.progressCount}/{task.targetCount || 1}
+                    </td>
+                    <td className="numeric">{formatCount(task.rewardPoints)}</td>
+                    <td className="actions">
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        disabled={!task.completed || task.claimed}
+                        onClick={() => void handleClaimTask(task.id)}
+                      >
+                        {task.claimed ? "Claimed" : task.completed ? "Claim" : "In progress"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Redemption History</h2>
-        {redemptions.length === 0 ? (
-          <p className="muted">No redemption requests yet.</p>
-        ) : (
-          <div className="reward-list">
-            {redemptions.map((item) => (
-              <article key={item.id} className="reward-item">
-                <strong>{item.status}</strong>
-                <p>{item.pointsRequested} points requested</p>
-                {item.amountRequested !== null ? <p className="muted">Payable amount: {item.amountRequested}</p> : null}
-                <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
-                {item.note ? <p className="muted">Review note: {item.note}</p> : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+          <Panel title="Campaign updates">
+            {posts.length === 0 ? (
+              <StateView kind="empty" title="No campaign updates in your territory" />
+            ) : (
+              <ul className="stack-3" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {posts.slice(0, 6).map((post) => (
+                  <li key={post.id}>
+                    <strong>{post.title}</strong>
+                    <p className="muted-text">{post.content}</p>
+                    <p className="muted-text">{new Date(post.createdAt).toLocaleString()}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </PanelGrid>
+      </div>
     </main>
   );
 }
