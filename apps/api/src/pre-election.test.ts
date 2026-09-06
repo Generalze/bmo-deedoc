@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
-import { getPrivateObjectStorage } from "@pics-nigeria/object-storage";
+import {
+  CommittedObjectDeletionRefused,
+  discardPendingObject,
+  getPrivateObjectStorage,
+  promotePendingObject,
+} from "@pics-nigeria/object-storage";
 import { createApp } from "./app";
 import { hashPassword } from "./auth/password";
 import { env } from "./env";
@@ -1726,6 +1731,114 @@ export async function runPreElectionTests() {
       `/pre-election/verifications/${verification.id}/documents/${document.id}/access`,
     );
     assert.equal(anonymous.status === 401 || anonymous.status === 403, true, `anonymous got ${anonymous.status}`);
+    }
+
+    /* ---- Pending-object custody (rollback leaves no identity bytes) --------
+     * The bytes must be written before the row exists, or a row could name an
+     * object that is not there. That creates the opposite risk: a rolled-back
+     * submission retaining someone's identity document with no database owner.
+     * These assertions are about which of the two states the system ends in.
+     */
+    {
+      const bucket = getPrivateObjectStorage() as unknown as { keys(): string[] };
+      const pendingPrefix = "voter-verification/pending/";
+      const pendingKeys = () => bucket.keys().filter((key) => key.startsWith(pendingPrefix));
+      const committedKeys = () =>
+        bucket.keys().filter((key) => key.startsWith("voter-verification/") && !key.startsWith(pendingPrefix));
+
+      // B: a successful submission commits exactly one object, in the committed
+      // namespace, and leaves nothing pending.
+      const custodyMember = await registerMember("920", null, "custody-success");
+      const committedAfter = committedKeys();
+      assert.equal(pendingKeys().length, 0, "a committed submission must leave no pending object");
+
+      const committedDocument = await prisma.voterVerificationDocument.findFirstOrThrow({
+        where: { verification: { memberUserId: custodyMember.id } },
+      });
+      assert.equal(
+        committedAfter.includes(committedDocument.originalStorageKey),
+        true,
+        "the committed row must name an object that exists in the committed namespace",
+      );
+      assert.equal(
+        committedDocument.originalStorageKey.startsWith(pendingPrefix),
+        false,
+        "a committed document must never live in the pending namespace, where cleanup could delete it",
+      );
+      const committedObject = await getPrivateObjectStorage().getObject(committedDocument.originalStorageKey);
+      assert.ok(committedObject, "the promoted object must exist at the committed key");
+      assert.equal(committedObject.sha256, committedDocument.sha256);
+
+      // A + F: a submission the transaction refuses leaves no pending bytes.
+      // Approving the verification makes any resubmission fail inside the
+      // transaction, after the document has already been written to storage.
+      const custodyVerification = await prisma.voterVerification.findFirstOrThrow({
+        where: { memberUserId: custodyMember.id },
+      });
+      await prisma.voterVerification.update({
+        where: { id: custodyVerification.id },
+        data: { status: "VERIFIED" },
+      });
+
+      const pendingBefore = pendingKeys().length;
+      const documentsBefore = await prisma.voterVerificationDocument.count();
+      const custodyToken = await login(testEmail("member-920"));
+      const refused = await apiRequest("/pre-election/verifications/me/documents", {
+        method: "POST",
+        token: custodyToken,
+        body: {
+          documentProcessingConsent: true,
+          voterDocument: {
+            originalFileName: "rejected.pdf",
+            mimeType: "application/pdf",
+            content: pdfDocument("custody-rollback"),
+          },
+        },
+      });
+      assert.equal(refused.status === 409 || refused.status === 400, true, JSON.stringify(refused.payload));
+      assert.equal(
+        await prisma.voterVerificationDocument.count(),
+        documentsBefore,
+        "a refused submission must not write a document row",
+      );
+      assert.equal(
+        pendingKeys().length,
+        pendingBefore,
+        "a refused submission must not retain identity-document bytes in the pending namespace",
+      );
+
+      // D: the cleanup path cannot reach a committed object.
+      await assert.rejects(
+        () => discardPendingObject(committedDocument.originalStorageKey),
+        (error: unknown) => error instanceof CommittedObjectDeletionRefused,
+        "committed identity documents must not be deletable through pending cleanup",
+      );
+      assert.ok(
+        await getPrivateObjectStorage().getObject(committedDocument.originalStorageKey),
+        "the committed object must survive an attempted cleanup",
+      );
+
+      // G: the same refusal protects committed evidence, which shares the bucket.
+      await assert.rejects(
+        () => discardPendingObject("evidence/2026/09/some-evidence-object.jpg"),
+        (error: unknown) => error instanceof CommittedObjectDeletionRefused,
+        "committed evidence must not be deletable through pending cleanup",
+      );
+
+      // And a promotion may not move a document *into* the deletable namespace.
+      await assert.rejects(
+        () =>
+          promotePendingObject({
+            pendingKey: `${pendingPrefix}probe-object.pdf`,
+            committedKey: `${pendingPrefix}still-pending.pdf`,
+          }),
+        "promoting into the pending namespace must be refused",
+      );
+
+      await prisma.voterVerification.update({
+        where: { id: custodyVerification.id },
+        data: { status: "PENDING" },
+      });
     }
 
     console.log("pre_election_tests=passed");

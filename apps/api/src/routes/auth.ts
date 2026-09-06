@@ -12,9 +12,12 @@ import { OGUN_STATE_ID, normalizeEmail } from "@pics-nigeria/shared";
 import { signAccessToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
+import { createAuditLog } from "../lib/audit";
 import { generateUniqueReferralCode } from "../auth/referral";
 import {
   VoterDocumentRejected,
+  commitVoterDocument,
+  discardVoterDocument,
   storeVoterDocument,
   voterDocumentSubmissionSchema,
 } from "../lib/voter-document-storage";
@@ -307,6 +310,26 @@ const SERVER_DERIVED_ANCESTRY_FIELDS = [
   "federalConstituencyId",
   "stateConstituencyId",
 ] as const;
+
+
+/**
+ * Rollback left bytes behind. Say so.
+ *
+ * Requirement C of the custody model: a cleanup failure must be observable and
+ * retryable, and must never be reported as a clean rollback.
+ *
+ * There is deliberately no audit row here. The audit log requires an actor, and
+ * a registration that rolled back has no user to name — inventing one would put
+ * a fictional actor in the trail that governs identity decisions. The record is
+ * a structured log line, which ships off-host, plus the pending-namespace
+ * lifecycle rule as the backstop. The two submission paths that *do* have an
+ * authenticated member audit properly; this one cannot, and says why.
+ */
+function reportOrphanedVoterDocument(stored: { documentId: string; pendingStorageKey: string }, reason: string) {
+  console.error(
+    `voter_document_orphan documentId=${stored.documentId} pendingStorageKey=${stored.pendingStorageKey} reason=${reason} consequence=identity_document_bytes_retained_without_owner`,
+  );
+}
 
 router.post("/register-voter", async (request, response) => {
   const suppliedAncestryFields = SERVER_DERIVED_ANCESTRY_FIELDS.filter(
@@ -629,12 +652,51 @@ router.post("/register-voter", async (request, response) => {
     /**
      * The transaction has already rolled back by the time this runs, so a
      * refused ancestry leaves no user, no profile, no verification record and
-     * no referral — the registration simply did not happen.
+     * no referral.
+     *
+     * The document bytes are the one thing a rollback cannot undo: they were
+     * written to storage before the transaction, because a row must never name
+     * an object that does not exist. They live in the pending namespace,
+     * owned by nothing, so they are removed here — otherwise a failed
+     * registration would retain someone's identity document with no database
+     * owner and no lifecycle.
      */
+    if (storedDocument) {
+      const cleanup = await discardVoterDocument(storedDocument);
+      if (!cleanup.discarded) {
+        reportOrphanedVoterDocument(storedDocument, cleanup.error || "unknown");
+      }
+    }
     if (error instanceof MemberAncestryError) {
       return response.status(400).json({ message: error.message, code: error.code });
     }
     throw error;
+  }
+
+  /**
+   * The row exists. Move the bytes to the key it points at.
+   *
+   * Promotion is after commit on purpose: promoting first and then rolling back
+   * would strand a committed object that no cleanup path is permitted to
+   * delete.
+   */
+  if (storedDocument) {
+    try {
+      await commitVoterDocument(storedDocument);
+    } catch (promotionError) {
+      await createAuditLog(prisma, {
+        actorUserId: createdUser.id,
+        action: "VERIFICATION_DOCUMENT_PROMOTION_FAILED",
+        targetType: "VoterVerificationDocument",
+        targetId: storedDocument.documentId,
+        metadata: {
+          pendingStorageKey: storedDocument.pendingStorageKey,
+          committedStorageKey: storedDocument.originalStorageKey,
+          reason: promotionError instanceof Error ? promotionError.message : String(promotionError),
+          consequence: "The document record exists; document access refuses until the object is promoted.",
+        },
+      }).catch(() => undefined);
+    }
   }
 
   const authUser = await getAuthUserProfile(createdUser.id);

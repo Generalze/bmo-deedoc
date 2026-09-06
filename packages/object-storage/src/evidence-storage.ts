@@ -24,6 +24,15 @@ export interface EvidenceObjectStorage {
   }): Promise<StoredEvidenceObject>;
   getObject(key: string): Promise<StoredEvidenceObject | null>;
   createSignedGetUrl(key: string, expiresInSeconds: number): Promise<SignedEvidenceAccess>;
+  /**
+   * Both of these exist only to serve the pending-custody model below, and
+   * neither should be called directly. Use promotePendingObject and
+   * discardPendingObject, which refuse to act on anything outside the pending
+   * namespace. A committed object must not be reachable by a delete that the
+   * application can issue.
+   */
+  deleteObjectUnchecked(key: string): Promise<void>;
+  copyObjectUnchecked(sourceKey: string, destinationKey: string): Promise<StoredEvidenceObject>;
 }
 
 export class EvidenceObjectAlreadyExistsError extends Error {
@@ -85,6 +94,33 @@ export class InMemoryEvidenceObjectStorage implements EvidenceObjectStorage {
       )}&signature=${signature}`,
       expiresAt,
     };
+  }
+
+  async deleteObjectUnchecked(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+
+  /**
+   * Every key currently held. Present on the in-memory driver only, so a test
+   * can assert that a rolled-back submission left nothing behind — an assertion
+   * that is otherwise impossible, because the key of a discarded object is
+   * never returned to the caller.
+   */
+  keys(): string[] {
+    return [...this.objects.keys()];
+  }
+
+  async copyObjectUnchecked(sourceKey: string, destinationKey: string): Promise<StoredEvidenceObject> {
+    const source = this.objects.get(sourceKey);
+    if (!source) {
+      throw new Error(`Cannot copy a missing object: ${sourceKey}`);
+    }
+    if (this.objects.has(destinationKey)) {
+      throw new EvidenceObjectAlreadyExistsError(destinationKey);
+    }
+    const copy = { ...source, key: destinationKey, body: Buffer.from(source.body) };
+    this.objects.set(destinationKey, copy);
+    return { ...copy, body: Buffer.from(copy.body) };
   }
 }
 
@@ -260,6 +296,31 @@ export class S3CompatibleEvidenceObjectStorage implements EvidenceObjectStorage 
       expiresAt: new Date(now.getTime() + expiresInSeconds * 1000),
     };
   }
+
+  async deleteObjectUnchecked(key: string): Promise<void> {
+    const url = this.objectUrl(key);
+    const headers = this.authHeaders("DELETE", url, Buffer.alloc(0), {});
+    const result = await fetch(url, { method: "DELETE", headers });
+    // 404 is success for our purpose: the object is not there.
+    if (!result.ok && result.status !== 404) {
+      throw new Error(`S3-compatible object delete failed with HTTP ${result.status}.`);
+    }
+  }
+
+  async copyObjectUnchecked(sourceKey: string, destinationKey: string): Promise<StoredEvidenceObject> {
+    const source = await this.getObject(sourceKey);
+    if (!source) {
+      throw new Error(`Cannot copy a missing object: ${sourceKey}`);
+    }
+    // Read-then-write rather than CopyObject: it works identically on every
+    // S3-compatible provider, and it re-verifies the bytes on the way through.
+    return this.putObjectIfAbsent({
+      key: destinationKey,
+      body: source.body,
+      contentType: source.contentType,
+      metadata: { promotedfrom: sourceKey.slice(-120) },
+    });
+  }
 }
 
 export type EvidenceStorageConfig = {
@@ -335,8 +396,73 @@ export function getPrivateObjectStorage() {
   return getEvidenceObjectStorage();
 }
 
-/** Key prefixes that keep the two domains apart inside the shared bucket. */
+/** Key prefixes that keep the domains apart inside the shared bucket. */
 export const PRIVATE_STORAGE_PREFIXES = {
   evidence: "evidence",
   voterVerification: "voter-verification",
+  /**
+   * Bytes the server has received but that no committed database row owns yet.
+   *
+   * A document is written here first, and moves to its committed key only once
+   * the transaction that records it has actually committed. If that transaction
+   * fails, the pending object is discarded — so a rolled-back registration
+   * leaves no identity document behind with nothing to own it.
+   */
+  voterVerificationPending: "voter-verification/pending",
 } as const;
+
+export class CommittedObjectDeletionRefused extends Error {
+  constructor(key: string) {
+    super(
+      `Refusing to delete "${key}": it is not a pending object. Committed evidence and committed identity documents are never deletable through this path.`,
+    );
+  }
+}
+
+/** True only for keys inside the pending namespace. */
+export function isPendingObjectKey(key: string) {
+  return key.startsWith(`${PRIVATE_STORAGE_PREFIXES.voterVerificationPending}/`);
+}
+
+/**
+ * Removes an object that no committed row owns.
+ *
+ * This is the only deletion the application can perform, and it refuses any key
+ * outside the pending namespace. The bucket policy narrows the same boundary
+ * from the other side; this makes the rule true in code as well as in IAM, so a
+ * misconfigured policy cannot turn a cleanup into evidence destruction.
+ */
+export async function discardPendingObject(key: string): Promise<void> {
+  if (!isPendingObjectKey(key)) {
+    throw new CommittedObjectDeletionRefused(key);
+  }
+  await getPrivateObjectStorage().deleteObjectUnchecked(key);
+}
+
+/**
+ * Moves a pending object to its committed key, then removes the pending copy.
+ *
+ * Refuses to promote from outside the pending namespace, and refuses to promote
+ * *into* it — a committed document must not end up somewhere a cleanup could
+ * later delete it.
+ */
+export async function promotePendingObject(input: {
+  pendingKey: string;
+  committedKey: string;
+}): Promise<void> {
+  if (!isPendingObjectKey(input.pendingKey)) {
+    throw new CommittedObjectDeletionRefused(input.pendingKey);
+  }
+  if (isPendingObjectKey(input.committedKey)) {
+    throw new Error(
+      `Refusing to promote into the pending namespace: ${input.committedKey}. A committed document must not be deletable by pending cleanup.`,
+    );
+  }
+
+  const storage = getPrivateObjectStorage();
+  await storage.copyObjectUnchecked(input.pendingKey, input.committedKey);
+  // Only once the committed copy exists. If this delete fails the committed
+  // document is already safe; the leftover pending object is caught by the
+  // pending-namespace lifecycle rule.
+  await storage.deleteObjectUnchecked(input.pendingKey);
+}

@@ -9,15 +9,20 @@
  * They were not stored at all. `VoterVerificationDocument` recorded a storage
  * key the client chose, a size the client stated and a SHA-256 the client
  * computed, with `storageProvider` set to the literal string
- * "PRIVATE_OBJECT_STORAGE_STUB". Two routes wrote that record, each with its own
- * copy of the logic, and the access route answered with `crypto.randomUUID()`
- * as though it were an access grant.
+ * "PRIVATE_OBJECT_STORAGE_STUB". Three routes wrote that record, each with its
+ * own copy of the logic, and the access route answered with
+ * `crypto.randomUUID()` as though it were an access grant.
  *
- * This guards the shape of the fix rather than the fix itself: every write of a
- * voter document must come from `storeVoterDocument`, so a third route added
- * later cannot quietly reintroduce a client-authoritative path. It is the same
- * check the money-out chokepoint gets, for the same reason — a second way in is
- * how the first guarantee is lost.
+ * Storing the bytes created a second problem, which this also guards. They must
+ * be written before the row exists — a row must never name an object that is
+ * not there — so a transaction that then fails would strand an identity
+ * document with no database owner and no lifecycle. Documents therefore land in
+ * a pending namespace and are promoted only once the row is committed, and the
+ * only deletion the application can perform is bounded to that namespace.
+ *
+ * This guards the shape of the fix: every write goes through one authority,
+ * custody is attached to the transaction outcome, and committed evidence stays
+ * undeletable by application credentials.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -26,6 +31,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const apiSource = path.join(repoRoot, "apps/api/src");
 const authorityRelative = "apps/api/src/lib/voter-document-storage.ts";
+const storageRelative = "packages/object-storage/src/evidence-storage.ts";
 const failures = [];
 const notes = [];
 
@@ -42,6 +48,20 @@ function sourceFiles(directory) {
   return found;
 }
 
+function relativePath(file) {
+  return path.relative(repoRoot, file).split(path.sep).join("/");
+}
+
+/** The body of a top-level exported function, up to its closing brace. */
+function functionBody(text, declaration) {
+  const start = text.indexOf(declaration);
+  if (start === -1) return null;
+  // A closing brace alone on its line. A multi-line signature ends with
+  // "}): Promise<void> {", which must not be mistaken for the end of the body.
+  const match = text.slice(start).match(/^[\s\S]*?^\}$/m);
+  return match ? match[0] : null;
+}
+
 const authorityPath = path.join(repoRoot, authorityRelative);
 let authority;
 try {
@@ -51,14 +71,20 @@ try {
   process.exit(1);
 }
 
-/* ---- The authority still derives what it must ---------------------------- */
+/* ---- The authority derives what only the server can know ----------------- */
 
-const requiredInAuthority = [
-  ["createHash(\"sha256\")", "the authority must compute the document hash itself"],
+for (const [needle, why] of [
+  ['createHash("sha256")', "the authority must compute the document hash itself"],
   ["putObjectIfAbsent", "the authority must actually store the bytes"],
   ["getPrivateObjectStorage", "the authority must use private object storage"],
-];
-for (const [needle, why] of requiredInAuthority) {
+  ["withVoterDocumentCustody", "custody must be attached to the transaction outcome"],
+  ["commitVoterDocument", "a committed row must promote its object"],
+  ["discardVoterDocument", "a failed transaction must discard its object"],
+  [
+    "PRIVATE_STORAGE_PREFIXES.voterVerificationPending",
+    "documents must land in the pending namespace first, or a failed transaction strands them where cleanup cannot reach",
+  ],
+]) {
   if (!authority.includes(needle)) {
     failures.push(`${authorityRelative}: ${why}.`);
   }
@@ -90,13 +116,11 @@ const files = sourceFiles(apiSource);
 let writeSites = 0;
 
 for (const file of files) {
-  const relative = path.relative(repoRoot, file).replace(/\\/g, "/");
+  const relative = relativePath(file);
   if (relative === authorityRelative) continue;
   const text = readFileSync(file, "utf8");
   const isTest = relative.endsWith(".test.ts");
 
-  // A create against the document table anywhere other than through the
-  // authority's returned fields.
   const creates = text.match(/voterVerificationDocument\.create\s*\(/g) || [];
   const nestedCreates = text.match(/documents:\s*\w+\s*\n?\s*\?\s*\{\s*\n?\s*create:/g) || [];
   const total = creates.length + nestedCreates.length;
@@ -110,6 +134,11 @@ for (const file of files) {
       `${relative} writes a VoterVerificationDocument without importing storeVoterDocument. Every document write must take custody of the bytes through the single authority.`,
     );
   }
+  if (!text.includes("withVoterDocumentCustody") && !text.includes("discardVoterDocument")) {
+    failures.push(
+      `${relative} writes a VoterVerificationDocument without attaching custody to the transaction outcome. A rolled-back submission would retain the bytes with no database owner.`,
+    );
+  }
 }
 
 notes.push(`voter_document_write_sites=${writeSites}`);
@@ -117,22 +146,68 @@ notes.push(`voter_document_write_sites=${writeSites}`);
 /* ---- The stub cannot return ---------------------------------------------- */
 
 for (const file of files) {
-  const relative = path.relative(repoRoot, file).replace(/\\/g, "/");
+  const relative = relativePath(file);
   const text = readFileSync(file, "utf8");
-  // The authority documents the history in prose; what matters is that no code
-  // path still writes the value.
-  const mentionsInCode = /storageProvider:\s*"PRIVATE_OBJECT_STORAGE_STUB"|=\s*"PRIVATE_OBJECT_STORAGE_STUB"|return[^;]*"PRIVATE_OBJECT_STORAGE_STUB"/.test(text);
-  if (mentionsInCode && !relative.endsWith(".test.ts")) {
+  const writesStub =
+    /storageProvider:\s*"PRIVATE_OBJECT_STORAGE_STUB"/.test(text) ||
+    /=\s*"PRIVATE_OBJECT_STORAGE_STUB"/.test(text) ||
+    /return[^;]*"PRIVATE_OBJECT_STORAGE_STUB"/.test(text);
+  if (writesStub && !relative.endsWith(".test.ts")) {
     failures.push(
-      `${relative} still references PRIVATE_OBJECT_STORAGE_STUB. That value named a provider which stored nothing while reading as private storage.`,
+      `${relative} still writes PRIVATE_OBJECT_STORAGE_STUB. That value named a provider which stored nothing while reading as private storage.`,
     );
   }
 }
 
-/* ---- Access is signed and short lived ------------------------------------ */
+/* ---- Deletion authority stays narrow -------------------------------------
+ * The application may remove an object that no committed row owns, and nothing
+ * else. If this boundary widens, a cleanup becomes evidence destruction — and
+ * the bucket policy alone should not be the only thing preventing it.
+ */
 
-const preElectionRoute = path.join(repoRoot, "apps/api/src/routes/pre-election.ts");
-const routeText = readFileSync(preElectionRoute, "utf8");
+const storageText = readFileSync(path.join(repoRoot, storageRelative), "utf8");
+
+if (!storageText.includes("export function isPendingObjectKey")) {
+  failures.push(`${storageRelative}: the pending-key predicate is gone; deletion is no longer namespace-bounded.`);
+}
+
+const discardBody = functionBody(storageText, "export async function discardPendingObject");
+if (!discardBody) {
+  failures.push(`${storageRelative}: discardPendingObject is missing.`);
+} else {
+  if (!discardBody.includes("isPendingObjectKey(key)")) {
+    failures.push(
+      `${storageRelative}: discardPendingObject no longer refuses keys outside the pending namespace. Committed evidence and identity documents would become deletable by the application.`,
+    );
+  }
+  if (!discardBody.includes("CommittedObjectDeletionRefused")) {
+    failures.push(`${storageRelative}: discardPendingObject no longer throws CommittedObjectDeletionRefused.`);
+  }
+}
+
+const promoteBody = functionBody(storageText, "export async function promotePendingObject");
+if (!promoteBody) {
+  failures.push(`${storageRelative}: promotePendingObject is missing.`);
+} else if (!promoteBody.includes("isPendingObjectKey(input.committedKey)")) {
+  failures.push(
+    `${storageRelative}: promotePendingObject no longer refuses promotion into the pending namespace. A committed document could land somewhere cleanup may delete it.`,
+  );
+}
+
+/** Only the narrow wrappers may reach the raw delete. */
+for (const file of files) {
+  const relative = relativePath(file);
+  if (relative.endsWith(".test.ts")) continue;
+  if (readFileSync(file, "utf8").includes("deleteObjectUnchecked")) {
+    failures.push(
+      `${relative} calls deleteObjectUnchecked directly. Deletion must go through discardPendingObject, which refuses anything outside the pending namespace.`,
+    );
+  }
+}
+
+/* ---- Access is signed, verified and short lived -------------------------- */
+
+const routeText = readFileSync(path.join(repoRoot, "apps/api/src/routes/pre-election.ts"), "utf8");
 const accessIndex = routeText.indexOf("VERIFICATION_DOCUMENT_ACCESS_GRANTED");
 if (accessIndex === -1) {
   failures.push("apps/api/src/routes/pre-election.ts no longer audits voter document access.");
@@ -152,13 +227,13 @@ if (accessIndex === -1) {
 
 /* ---- The migration keeps the constraints --------------------------------- */
 
-const migration = path.join(
+const migrationPath = path.join(
   repoRoot,
   "packages/database/prisma/ogun-migrations/20260906120000_voter_document_private_storage/migration.sql",
 );
 let migrationText = "";
 try {
-  migrationText = readFileSync(migration, "utf8");
+  migrationText = readFileSync(migrationPath, "utf8");
 } catch {
   failures.push("The voter document private storage migration is missing.");
 }
