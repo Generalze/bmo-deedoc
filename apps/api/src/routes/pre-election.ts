@@ -26,7 +26,14 @@ import {
   SNAPSHOT_COMPATIBILITY_SCAN_LIMIT,
   type MemberTerritoryLevel,
 } from "../lib/member-territory-scope";
+import { getPrivateObjectStorage } from "@pics-nigeria/object-storage";
 import { createAuditLog } from "../lib/audit";
+import {
+  VoterDocumentRejected,
+  storeVoterDocument,
+  withVoterDocumentCustody,
+  voterDocumentSubmissionSchema,
+} from "../lib/voter-document-storage";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
 import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
@@ -68,24 +75,7 @@ const verificationDecisionSchema = z.object({
 
 const verificationDocumentSchema = z.object({
   documentProcessingConsent: z.literal(true),
-  voterDocument: z.object({
-    originalStorageKey: z
-      .string()
-      .trim()
-      .min(20)
-      .max(500)
-      .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
-    previewStorageKey: z
-      .string()
-      .trim()
-      .max(500)
-      .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
-      .optional(),
-    originalFileName: z.string().trim().min(1).max(255),
-    mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-    fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
-    sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
-  }),
+  voterDocument: voterDocumentSubmissionSchema,
 });
 
 const rewardRuleSchema = z
@@ -797,7 +787,23 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
     return response.status(400).json({ message: "Invalid verification document payload.", errors: parsed.error.flatten() });
   }
 
-  const result = await prisma.$transaction(async (transaction) => {
+  let storedDocument;
+  try {
+    storedDocument = await storeVoterDocument({
+      submission: parsed.data.voterDocument,
+      memberUserId: request.authUser!.id,
+    });
+  } catch (caught) {
+    if (caught instanceof VoterDocumentRejected) {
+      return response.status(caught.status).json({ message: caught.message, code: caught.code });
+    }
+    throw caught;
+  }
+
+  const result = await withVoterDocumentCustody(
+    { stored: storedDocument, actorUserId: request.authUser!.id, committed: (value) => !(value instanceof Error) },
+    () =>
+      prisma.$transaction(async (transaction) => {
     const verification = await transaction.voterVerification.findUnique({
       where: { memberUserId: request.authUser!.id },
     });
@@ -813,7 +819,7 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
 
     const duplicateDocument = await transaction.voterVerificationDocument.findFirst({
       where: {
-        sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+        sha256: storedDocument.sha256,
         verification: { memberUserId: { not: request.authUser!.id } },
       },
       select: { id: true },
@@ -821,14 +827,19 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
 
     await transaction.voterVerificationDocument.create({
       data: {
+        id: storedDocument.documentId,
         verificationId: verification.id,
-        originalStorageKey: parsed.data.voterDocument.originalStorageKey,
-        previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
+        originalStorageKey: storedDocument.originalStorageKey,
+        previewStorageKey: null,
         originalFileName: parsed.data.voterDocument.originalFileName,
         mimeType: parsed.data.voterDocument.mimeType,
-        fileSize: parsed.data.voterDocument.fileSize,
-        sha256: parsed.data.voterDocument.sha256.toLowerCase(),
-        storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+        // Every authoritative field below is derived from the bytes the server
+        // received, not from anything the client said about them.
+        fileSize: storedDocument.fileSize,
+        sha256: storedDocument.sha256,
+        storageProvider: storedDocument.storageProvider,
+        storageBucket: storedDocument.storageBucket,
+        serverReceivedAt: storedDocument.serverReceivedAt,
       },
     });
 
@@ -873,7 +884,8 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
     });
 
     return updated;
-  }).catch((error: unknown) => (error instanceof Error ? error : Promise.reject(error)));
+      }).catch((error: unknown) => (error instanceof Error ? error : Promise.reject(error))),
+  );
 
   if (result instanceof Error) {
     if (result.message === "NOT_FOUND") {
@@ -1071,6 +1083,63 @@ router.get(
       return response.status(404).json({ message: "Verification document was not found." });
     }
 
+    /**
+     * A row that predates private storage describes a document that was never
+     * uploaded. Issuing a URL for it would produce a link to nothing while
+     * reading as a successful, audited access.
+     */
+    if (document.storageProvider === "UNSTORED_LEGACY_STUB" || !document.storageBucket) {
+      await createAuditLog(prisma, {
+        actorUserId: request.authUser!.id,
+        action: "VERIFICATION_DOCUMENT_ACCESS_REFUSED",
+        targetType: "VoterVerificationDocument",
+        targetId: document.id,
+        metadata: {
+          verificationId: document.verification.id,
+          reason: "DOCUMENT_WAS_NEVER_STORED",
+        },
+      });
+      return response.status(409).json({
+        message:
+          "This document was recorded before private storage existed and its bytes were never stored. Ask the member to resubmit.",
+        code: "DOCUMENT_WAS_NEVER_STORED",
+      });
+    }
+
+    const storage = getPrivateObjectStorage();
+    const stored = await storage.getObject(document.originalStorageKey);
+
+    /**
+     * The stored bytes must still hash to what was recorded at upload. A
+     * mismatch means the object was replaced or corrupted, and a validator
+     * deciding someone's identity must not be shown it as though it were the
+     * document that was submitted.
+     */
+    if (!stored || stored.sha256 !== document.sha256) {
+      await createAuditLog(prisma, {
+        actorUserId: request.authUser!.id,
+        action: "VERIFICATION_DOCUMENT_ACCESS_REFUSED",
+        targetType: "VoterVerificationDocument",
+        targetId: document.id,
+        metadata: {
+          verificationId: document.verification.id,
+          reason: stored ? "STORED_HASH_MISMATCH" : "OBJECT_MISSING",
+          recordedSha256: document.sha256,
+          storedSha256: stored?.sha256 ?? null,
+        },
+      });
+      return response.status(409).json({
+        message: stored
+          ? "The stored document no longer matches the hash recorded at upload."
+          : "The stored document could not be found.",
+        code: stored ? "STORED_HASH_MISMATCH" : "OBJECT_MISSING",
+      });
+    }
+
+    // Short-lived by construction, and never a permanent public URL.
+    const expiresInSeconds = 300;
+    const signed = await storage.createSignedGetUrl(document.originalStorageKey, expiresInSeconds);
+
     await createAuditLog(prisma, {
       actorUserId: request.authUser!.id,
       action: "VERIFICATION_DOCUMENT_ACCESS_GRANTED",
@@ -1079,15 +1148,18 @@ router.get(
       metadata: {
         verificationId: document.verification.id,
         memberUserId: document.verification.memberUserId,
-        expiresInSeconds: 300,
+        expiresInSeconds,
+        verifiedSha256: stored.sha256,
+        storageBucket: document.storageBucket,
       },
     });
 
     return response.json({
       storageProvider: document.storageProvider,
       storageKey: document.originalStorageKey,
-      accessToken: crypto.randomUUID(),
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      url: signed.url,
+      expiresAt: signed.expiresAt,
+      verifiedSha256: stored.sha256,
     });
   },
 );

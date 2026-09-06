@@ -12,7 +12,15 @@ import { OGUN_STATE_ID, normalizeEmail } from "@pics-nigeria/shared";
 import { signAccessToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
+import { createAuditLog } from "../lib/audit";
 import { generateUniqueReferralCode } from "../auth/referral";
+import {
+  VoterDocumentRejected,
+  commitVoterDocument,
+  discardVoterDocument,
+  storeVoterDocument,
+  voterDocumentSubmissionSchema,
+} from "../lib/voter-document-storage";
 import { syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { deriveMemberAncestryFromWard, MemberAncestryError } from "../lib/member-ancestry";
 import { validateTerritoryReferences } from "../lib/territory";
@@ -61,26 +69,7 @@ const registerVoterSchema = z.object({
   documentProcessingConsent: z.boolean().optional(),
   confirmAdult: z.boolean().optional(),
   consentVersion: z.string().trim().max(50).optional(),
-  voterDocument: z
-    .object({
-      originalStorageKey: z
-        .string()
-        .trim()
-        .min(20)
-        .max(500)
-        .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
-      previewStorageKey: z
-        .string()
-        .trim()
-        .max(500)
-        .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
-        .optional(),
-      originalFileName: z.string().trim().min(1).max(255),
-      mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-      fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
-      sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
-    })
-    .optional(),
+  voterDocument: voterDocumentSubmissionSchema.optional(),
 });
 
 router.post("/login", async (request, response) => {
@@ -322,6 +311,26 @@ const SERVER_DERIVED_ANCESTRY_FIELDS = [
   "stateConstituencyId",
 ] as const;
 
+
+/**
+ * Rollback left bytes behind. Say so.
+ *
+ * Requirement C of the custody model: a cleanup failure must be observable and
+ * retryable, and must never be reported as a clean rollback.
+ *
+ * There is deliberately no audit row here. The audit log requires an actor, and
+ * a registration that rolled back has no user to name — inventing one would put
+ * a fictional actor in the trail that governs identity decisions. The record is
+ * a structured log line, which ships off-host, plus the pending-namespace
+ * lifecycle rule as the backstop. The two submission paths that *do* have an
+ * authenticated member audit properly; this one cannot, and says why.
+ */
+function reportOrphanedVoterDocument(stored: { documentId: string; pendingStorageKey: string }, reason: string) {
+  console.error(
+    `voter_document_orphan documentId=${stored.documentId} pendingStorageKey=${stored.pendingStorageKey} reason=${reason} consequence=identity_document_bytes_retained_without_owner`,
+  );
+}
+
 router.post("/register-voter", async (request, response) => {
   const suppliedAncestryFields = SERVER_DERIVED_ANCESTRY_FIELDS.filter(
     (field) => request.body !== null && typeof request.body === "object" && field in (request.body as object),
@@ -480,6 +489,30 @@ router.post("/register-voter", async (request, response) => {
   const referralCode = await generateUniqueReferralCode();
   const passwordHash = await hashPassword(parsed.data.password);
 
+  /**
+   * Custody of the document is taken before the account exists.
+   *
+   * If storage refuses, the registration is refused with it. The alternative —
+   * creating the member and recording a document that was never stored — is the
+   * state this replaces, and it is worse than asking someone to try again.
+   */
+  let storedDocument: Awaited<ReturnType<typeof storeVoterDocument>> | null = null;
+  if (parsed.data.voterDocument) {
+    try {
+      storedDocument = await storeVoterDocument({
+        submission: parsed.data.voterDocument,
+        // The account does not exist yet; the document is attributed to the
+        // verification it is about to be attached to.
+        memberUserId: "pending-registration",
+      });
+    } catch (caught) {
+      if (caught instanceof VoterDocumentRejected) {
+        return response.status(caught.status).json({ message: caught.message, code: caught.code });
+      }
+      throw caught;
+    }
+  }
+
   let createdUser;
   try {
     createdUser = await prisma.$transaction(async (transaction) => {
@@ -537,10 +570,12 @@ router.post("/register-voter", async (request, response) => {
             },
           });
 
-      const duplicateDocument = parsed.data.voterDocument
+      const duplicateDocument = storedDocument
         ? await transaction.voterVerificationDocument.findFirst({
             where: {
-              sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+              // The server's hash of the bytes it stored. Comparing a
+              // client-supplied hash made this check both evadable and abusable.
+              sha256: storedDocument.sha256,
               verification: {
                 memberUserId: { not: user.id },
               },
@@ -553,20 +588,25 @@ router.post("/register-voter", async (request, response) => {
         data: {
           memberUserId: user.id,
           voterIdentifier: voterCardNumber,
-          status: parsed.data.voterDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
+          status: storedDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
           isFlagged: Boolean(duplicateDocument),
           fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
-          submittedAt: parsed.data.voterDocument ? new Date() : null,
-          documents: parsed.data.voterDocument
+          submittedAt: storedDocument ? storedDocument.serverReceivedAt : null,
+          documents: storedDocument
             ? {
                 create: {
-                  originalStorageKey: parsed.data.voterDocument.originalStorageKey,
-                  previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
-                  originalFileName: parsed.data.voterDocument.originalFileName,
-                  mimeType: parsed.data.voterDocument.mimeType,
-                  fileSize: parsed.data.voterDocument.fileSize,
-                  sha256: parsed.data.voterDocument.sha256.toLowerCase(),
-                  storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+                  id: storedDocument.documentId,
+                  originalStorageKey: storedDocument.originalStorageKey,
+                  previewStorageKey: null,
+                  originalFileName: storedDocument.originalFileName,
+                  mimeType: storedDocument.mimeType,
+                  // Derived from the bytes the server received, never asserted
+                  // by the registering client.
+                  fileSize: storedDocument.fileSize,
+                  sha256: storedDocument.sha256,
+                  storageProvider: storedDocument.storageProvider,
+                  storageBucket: storedDocument.storageBucket,
+                  serverReceivedAt: storedDocument.serverReceivedAt,
                 },
               }
             : undefined,
@@ -579,7 +619,7 @@ router.post("/register-voter", async (request, response) => {
           actorUserId: user.id,
           fromStatus: null,
           toStatus: verification.status,
-          decision: parsed.data.voterDocument
+          decision: storedDocument
             ? duplicateDocument
               ? VoterVerificationDecision.FLAGGED
               : VoterVerificationDecision.SUBMITTED
@@ -612,12 +652,51 @@ router.post("/register-voter", async (request, response) => {
     /**
      * The transaction has already rolled back by the time this runs, so a
      * refused ancestry leaves no user, no profile, no verification record and
-     * no referral — the registration simply did not happen.
+     * no referral.
+     *
+     * The document bytes are the one thing a rollback cannot undo: they were
+     * written to storage before the transaction, because a row must never name
+     * an object that does not exist. They live in the pending namespace,
+     * owned by nothing, so they are removed here — otherwise a failed
+     * registration would retain someone's identity document with no database
+     * owner and no lifecycle.
      */
+    if (storedDocument) {
+      const cleanup = await discardVoterDocument(storedDocument);
+      if (!cleanup.discarded) {
+        reportOrphanedVoterDocument(storedDocument, cleanup.error || "unknown");
+      }
+    }
     if (error instanceof MemberAncestryError) {
       return response.status(400).json({ message: error.message, code: error.code });
     }
     throw error;
+  }
+
+  /**
+   * The row exists. Move the bytes to the key it points at.
+   *
+   * Promotion is after commit on purpose: promoting first and then rolling back
+   * would strand a committed object that no cleanup path is permitted to
+   * delete.
+   */
+  if (storedDocument) {
+    try {
+      await commitVoterDocument(storedDocument);
+    } catch (promotionError) {
+      await createAuditLog(prisma, {
+        actorUserId: createdUser.id,
+        action: "VERIFICATION_DOCUMENT_PROMOTION_FAILED",
+        targetType: "VoterVerificationDocument",
+        targetId: storedDocument.documentId,
+        metadata: {
+          pendingStorageKey: storedDocument.pendingStorageKey,
+          committedStorageKey: storedDocument.originalStorageKey,
+          reason: promotionError instanceof Error ? promotionError.message : String(promotionError),
+          consequence: "The document record exists; document access refuses until the object is promoted.",
+        },
+      }).catch(() => undefined);
+    }
   }
 
   const authUser = await getAuthUserProfile(createdUser.id);

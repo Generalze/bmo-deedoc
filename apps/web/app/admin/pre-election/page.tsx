@@ -477,7 +477,16 @@ export default function AdminPreElectionPage() {
                             onClick={() =>
                               token &&
                               accessPreElectionVerificationDocument(token, item.id, item.documents[0].id)
-                                .then((access) => setMessage(`Access token issued for ${access.storageKey}`))
+                                .then((access) => {
+                                  // A short-lived signed URL, opened once. This
+                                  // previously reported a storage key and a
+                                  // random token, and showed the validator
+                                  // nothing: no document had ever been stored.
+                                  window.open(access.url, "_blank", "noopener,noreferrer");
+                                  setMessage(
+                                    `Document opened. The link expires at ${new Date(access.expiresAt).toLocaleTimeString()} and the access is audited.`,
+                                  );
+                                })
                                 .catch((caught) => setError(describeApiError(caught).detail))
                             }
                           >

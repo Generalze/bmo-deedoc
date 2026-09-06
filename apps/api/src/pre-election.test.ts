@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import http from "node:http";
+import {
+  CommittedObjectDeletionRefused,
+  discardPendingObject,
+  getPrivateObjectStorage,
+  promotePendingObject,
+} from "@pics-nigeria/object-storage";
 import { createApp } from "./app";
 import { hashPassword } from "./auth/password";
 import { env } from "./env";
@@ -150,7 +157,20 @@ async function createUserFixtures() {
   });
 }
 
-async function registerMember(label: string, referralCode: string | null, sha256: string) {
+/**
+ * A minimal, genuinely valid PDF. The server checks the magic number and hashes
+ * the bytes, so a fixture has to be a real document: two members sharing a seed
+ * share a hash because they submitted the same file, which is what the
+ * duplicate-document check is meant to detect.
+ */
+function pdfDocument(seed: string) {
+  return Buffer.from(`%PDF-1.4
+% pre-election test document ${seed}
+%%EOF
+`, "utf8").toString("base64");
+}
+
+async function registerMember(label: string, referralCode: string | null, documentSeed: string) {
   const response = await apiRequest("/auth/register-voter", {
     method: "POST",
     body: {
@@ -174,20 +194,14 @@ async function registerMember(label: string, referralCode: string | null, sha256
       confirmAdult: true,
       consentVersion: "pre-election-test-v1",
       voterDocument: {
-        originalStorageKey: `voter-verification/test/${label}/${cryptoSafeKey(label)}`,
         originalFileName: `${label}.pdf`,
         mimeType: "application/pdf",
-        fileSize: 1024,
-        sha256,
+        content: pdfDocument(documentSeed),
       },
     },
   });
   assert.equal(response.status, 201, JSON.stringify(response.payload));
   return response.payload.user as { id: string; email: string };
-}
-
-function cryptoSafeKey(label: string) {
-  return `${label}-aaaaaaaaaaaaaaaaaaaaaaaa`;
 }
 
 async function cleanup() {
@@ -322,11 +336,9 @@ export async function runPreElectionTests() {
       body: {
         documentProcessingConsent: true,
         voterDocument: {
-          originalStorageKey: `voter-verification/test/001/resubmission-${cryptoSafeKey("001")}`,
           originalFileName: "001-resubmission.pdf",
           mimeType: "application/pdf",
-          fileSize: 2048,
-          sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          content: pdfDocument("001-resubmission"),
         },
       },
     });
@@ -349,7 +361,21 @@ export async function runPreElectionTests() {
       { token: validatorToken },
     );
     assert.equal(access.status, 200, JSON.stringify(access.payload));
-    assert.equal(typeof access.payload.accessToken, "string");
+    // The old assertion accepted any string here, and the route satisfied it
+    // with crypto.randomUUID(): a token that granted nothing and verified
+    // nothing, for a document that had never been stored.
+    assert.equal(typeof access.payload.url, "string", "access must return a URL to the stored document");
+    assert.equal(
+      typeof access.payload.verifiedSha256,
+      "string",
+      "access must verify the stored bytes against the recorded hash",
+    );
+    assert.equal(
+      new Date(access.payload.expiresAt as string).getTime() - Date.now() <= 6 * 60 * 1000,
+      true,
+      "the signed URL must be short lived",
+    );
+    // The storage key is an internal object address, never a public URL.
     assert.equal(/^https?:\/\//i.test(access.payload.storageKey as string), false);
 
     const claim = await apiRequest(`/pre-election/verifications/${verificationCase.id}/claim`, {
@@ -1509,6 +1535,311 @@ export async function runPreElectionTests() {
     // above is a test affordance, not a change to that default.
     assert.equal(env.PAYOUT_EXECUTION_ENABLED, false, "payout execution must default to disabled in every environment");
     setPayoutExecutionEnabledForTests(null);
+
+
+    /* ---- Voter-document private storage (feature 029) ----------------
+     * These documents are identity evidence. Before this the record named a
+     * storage key the client chose and a hash the client computed, and no
+     * bytes were ever uploaded — so the assertions below are about who is
+     * authoritative, not merely about whether an upload succeeds.
+     */
+    // ---- a voter document is stored privately and every authoritative field is derived by the server ----
+    {
+    const member = await registerMember("910", null, "private-storage");
+    const document = await prisma.voterVerificationDocument.findFirstOrThrow({
+      where: { verification: { memberUserId: member.id } },
+      orderBy: { uploadedAt: "desc" },
+    });
+
+    // The stub is gone: a provider that stored nothing while reading as
+    // private storage.
+    assert.notEqual(document.storageProvider, "PRIVATE_OBJECT_STORAGE_STUB");
+    assert.ok(document.storageBucket, "a stored document must record the bucket that holds it");
+    assert.ok(document.serverReceivedAt, "a stored document must record when the server took custody");
+
+    // The key is server-owned and namespaced, never the client's choice.
+    assert.match(document.originalStorageKey, /^voter-verification\/\d{4}\/\d{2}\//);
+    assert.equal(document.originalStorageKey.includes("client"), false);
+
+    // The bytes are really there, and hash to what was recorded.
+    const expected = Buffer.from(pdfDocument("private-storage"), "base64");
+    const expectedSha256 = createHash("sha256").update(expected).digest("hex");
+    assert.equal(document.sha256, expectedSha256, "the recorded hash must be the server's hash of the stored bytes");
+    assert.equal(document.fileSize, expected.byteLength, "the recorded size must be the size of the stored bytes");
+
+    const stored = await getPrivateObjectStorage().getObject(document.originalStorageKey);
+    assert.ok(stored, "the document bytes must actually exist in private storage");
+    assert.equal(stored.sha256, expectedSha256);
+    }
+
+    // ---- a client cannot choose the storage key, the size, or the hash of its own document ----
+    {
+    const token = await login(testEmail("member-910"));
+    const forged = await apiRequest("/pre-election/verifications/me/documents", {
+      method: "POST",
+      token,
+      body: {
+        documentProcessingConsent: true,
+        voterDocument: {
+          originalFileName: "forged.pdf",
+          mimeType: "application/pdf",
+          content: pdfDocument("forgery-attempt"),
+          // Everything below is what a client used to be able to assert.
+          originalStorageKey: "voter-verification/client/attacker-chosen-key-000000",
+          fileSize: 999999,
+          sha256: "f".repeat(64),
+        },
+      },
+    });
+    assert.equal(forged.status, 201, JSON.stringify(forged.payload));
+
+    const document = await prisma.voterVerificationDocument.findFirstOrThrow({
+      where: { verification: { memberUserId: { not: undefined } }, originalFileName: "forged.pdf" },
+      orderBy: { uploadedAt: "desc" },
+    });
+
+    const bytes = Buffer.from(pdfDocument("forgery-attempt"), "base64");
+    assert.equal(document.originalStorageKey.includes("attacker-chosen-key"), false, "the client chose the storage key");
+    assert.equal(document.fileSize, bytes.byteLength, "the client's stated size was believed");
+    assert.equal(document.sha256, createHash("sha256").update(bytes).digest("hex"), "the client's stated hash was believed");
+    assert.notEqual(document.sha256, "f".repeat(64));
+    }
+
+    // ---- content that does not match its declared type is refused rather than stored ----
+    {
+    const token = await login(testEmail("member-910"));
+    const before = await prisma.voterVerificationDocument.count();
+
+    const mislabelled = await apiRequest("/pre-election/verifications/me/documents", {
+      method: "POST",
+      token,
+      body: {
+        documentProcessingConsent: true,
+        voterDocument: {
+          originalFileName: "not-really.pdf",
+          mimeType: "application/pdf",
+          // A PNG header declared as a PDF.
+          content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]).toString("base64"),
+        },
+      },
+    });
+    assert.equal(mislabelled.status, 400, JSON.stringify(mislabelled.payload));
+    assert.equal(await prisma.voterVerificationDocument.count(), before, "a refused document must not be recorded");
+    }
+
+    // ---- the duplicate-document check compares hashes the server computed ----
+    {
+    // Two different members submitting the identical file. Neither of them
+    // states a hash, so the match can only come from the bytes.
+    const first = await registerMember("911", null, "shared-document");
+    const second = await registerMember("912", null, "shared-document");
+
+    const secondVerification = await prisma.voterVerification.findFirstOrThrow({
+      where: { memberUserId: second.id },
+    });
+    assert.equal(secondVerification.isFlagged, true, "an identical document must be flagged");
+    assert.equal(secondVerification.fraudReason, "DUPLICATE_DOCUMENT_HASH");
+
+    const firstVerification = await prisma.voterVerification.findFirstOrThrow({
+      where: { memberUserId: first.id },
+    });
+    assert.equal(firstVerification.isFlagged, false, "the first submitter must not be flagged by the second");
+    }
+
+    // ---- document access issues a short-lived signed URL, verifies the stored bytes, and is audited ----
+    {
+    const member = await registerMember("913", null, "access-check");
+    const document = await prisma.voterVerificationDocument.findFirstOrThrow({
+      where: { verification: { memberUserId: member.id } },
+    });
+    const verification = await prisma.voterVerification.findFirstOrThrow({
+      where: { memberUserId: member.id },
+    });
+
+    const access = await apiRequest(
+      `/pre-election/verifications/${verification.id}/documents/${document.id}/access`,
+      { token: validatorToken },
+    );
+    assert.equal(access.status, 200, JSON.stringify(access.payload));
+    const granted = access.payload as { url: string; expiresAt: string; verifiedSha256: string };
+
+    assert.ok(granted.url, "access must return a URL to the document");
+    assert.equal(granted.verifiedSha256, document.sha256, "access must verify the stored bytes against the record");
+
+    // Short-lived by construction, and never a permanent public URL.
+    const lifetimeMs = new Date(granted.expiresAt).getTime() - Date.now();
+    assert.ok(lifetimeMs > 0, "the signed URL must not already be expired");
+    assert.ok(lifetimeMs <= 6 * 60 * 1000, `the signed URL must be short lived, got ${lifetimeMs}ms`);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { action: "VERIFICATION_DOCUMENT_ACCESS_GRANTED", targetId: document.id },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(audit, "granting access to an identity document must be audited");
+    }
+
+    // ---- access is refused when the stored document no longer matches its recorded hash ----
+    {
+    const member = await registerMember("914", null, "tamper-check");
+    const document = await prisma.voterVerificationDocument.findFirstOrThrow({
+      where: { verification: { memberUserId: member.id } },
+    });
+    const verification = await prisma.voterVerification.findFirstOrThrow({
+      where: { memberUserId: member.id },
+    });
+
+    // The record now claims a hash the stored object does not have, which is
+    // what a replaced or corrupted object looks like.
+    await prisma.voterVerificationDocument.update({
+      where: { id: document.id },
+      data: { sha256: "a".repeat(64) },
+    });
+
+    const access = await apiRequest(
+      `/pre-election/verifications/${verification.id}/documents/${document.id}/access`,
+      { token: validatorToken },
+    );
+    assert.equal(access.status, 409, JSON.stringify(access.payload));
+    assert.equal((access.payload as { code: string }).code, "STORED_HASH_MISMATCH");
+
+    const refusal = await prisma.auditLog.findFirst({
+      where: { action: "VERIFICATION_DOCUMENT_ACCESS_REFUSED", targetId: document.id },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(refusal, "a refused access to an identity document must also be audited");
+    }
+
+    // ---- only a validator or super admin may open a voter document ----
+    {
+    const member = await registerMember("915", null, "authz-check");
+    const document = await prisma.voterVerificationDocument.findFirstOrThrow({
+      where: { verification: { memberUserId: member.id } },
+    });
+    const verification = await prisma.voterVerification.findFirstOrThrow({
+      where: { memberUserId: member.id },
+    });
+
+    // The member the document is about cannot mint an access URL for it.
+    const memberToken = await login(testEmail("member-915"));
+    const asMember = await apiRequest(
+      `/pre-election/verifications/${verification.id}/documents/${document.id}/access`,
+      { token: memberToken },
+    );
+    assert.equal(asMember.status === 401 || asMember.status === 403, true, `member got ${asMember.status}`);
+
+    const anonymous = await apiRequest(
+      `/pre-election/verifications/${verification.id}/documents/${document.id}/access`,
+    );
+    assert.equal(anonymous.status === 401 || anonymous.status === 403, true, `anonymous got ${anonymous.status}`);
+    }
+
+    /* ---- Pending-object custody (rollback leaves no identity bytes) --------
+     * The bytes must be written before the row exists, or a row could name an
+     * object that is not there. That creates the opposite risk: a rolled-back
+     * submission retaining someone's identity document with no database owner.
+     * These assertions are about which of the two states the system ends in.
+     */
+    {
+      const bucket = getPrivateObjectStorage() as unknown as { keys(): string[] };
+      const pendingPrefix = "voter-verification/pending/";
+      const pendingKeys = () => bucket.keys().filter((key) => key.startsWith(pendingPrefix));
+      const committedKeys = () =>
+        bucket.keys().filter((key) => key.startsWith("voter-verification/") && !key.startsWith(pendingPrefix));
+
+      // B: a successful submission commits exactly one object, in the committed
+      // namespace, and leaves nothing pending.
+      const custodyMember = await registerMember("920", null, "custody-success");
+      const committedAfter = committedKeys();
+      assert.equal(pendingKeys().length, 0, "a committed submission must leave no pending object");
+
+      const committedDocument = await prisma.voterVerificationDocument.findFirstOrThrow({
+        where: { verification: { memberUserId: custodyMember.id } },
+      });
+      assert.equal(
+        committedAfter.includes(committedDocument.originalStorageKey),
+        true,
+        "the committed row must name an object that exists in the committed namespace",
+      );
+      assert.equal(
+        committedDocument.originalStorageKey.startsWith(pendingPrefix),
+        false,
+        "a committed document must never live in the pending namespace, where cleanup could delete it",
+      );
+      const committedObject = await getPrivateObjectStorage().getObject(committedDocument.originalStorageKey);
+      assert.ok(committedObject, "the promoted object must exist at the committed key");
+      assert.equal(committedObject.sha256, committedDocument.sha256);
+
+      // A + F: a submission the transaction refuses leaves no pending bytes.
+      // Approving the verification makes any resubmission fail inside the
+      // transaction, after the document has already been written to storage.
+      const custodyVerification = await prisma.voterVerification.findFirstOrThrow({
+        where: { memberUserId: custodyMember.id },
+      });
+      await prisma.voterVerification.update({
+        where: { id: custodyVerification.id },
+        data: { status: "VERIFIED" },
+      });
+
+      const pendingBefore = pendingKeys().length;
+      const documentsBefore = await prisma.voterVerificationDocument.count();
+      const custodyToken = await login(testEmail("member-920"));
+      const refused = await apiRequest("/pre-election/verifications/me/documents", {
+        method: "POST",
+        token: custodyToken,
+        body: {
+          documentProcessingConsent: true,
+          voterDocument: {
+            originalFileName: "rejected.pdf",
+            mimeType: "application/pdf",
+            content: pdfDocument("custody-rollback"),
+          },
+        },
+      });
+      assert.equal(refused.status === 409 || refused.status === 400, true, JSON.stringify(refused.payload));
+      assert.equal(
+        await prisma.voterVerificationDocument.count(),
+        documentsBefore,
+        "a refused submission must not write a document row",
+      );
+      assert.equal(
+        pendingKeys().length,
+        pendingBefore,
+        "a refused submission must not retain identity-document bytes in the pending namespace",
+      );
+
+      // D: the cleanup path cannot reach a committed object.
+      await assert.rejects(
+        () => discardPendingObject(committedDocument.originalStorageKey),
+        (error: unknown) => error instanceof CommittedObjectDeletionRefused,
+        "committed identity documents must not be deletable through pending cleanup",
+      );
+      assert.ok(
+        await getPrivateObjectStorage().getObject(committedDocument.originalStorageKey),
+        "the committed object must survive an attempted cleanup",
+      );
+
+      // G: the same refusal protects committed evidence, which shares the bucket.
+      await assert.rejects(
+        () => discardPendingObject("evidence/2026/09/some-evidence-object.jpg"),
+        (error: unknown) => error instanceof CommittedObjectDeletionRefused,
+        "committed evidence must not be deletable through pending cleanup",
+      );
+
+      // And a promotion may not move a document *into* the deletable namespace.
+      await assert.rejects(
+        () =>
+          promotePendingObject({
+            pendingKey: `${pendingPrefix}probe-object.pdf`,
+            committedKey: `${pendingPrefix}still-pending.pdf`,
+          }),
+        "promoting into the pending namespace must be refused",
+      );
+
+      await prisma.voterVerification.update({
+        where: { id: custodyVerification.id },
+        data: { status: "PENDING" },
+      });
+    }
 
     console.log("pre_election_tests=passed");
   } finally {

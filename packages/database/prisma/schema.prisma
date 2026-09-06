@@ -1015,14 +1015,21 @@ model VoterVerification {
 model VoterVerificationDocument {
   id                 String            @id @default(cuid())
   verificationId     String
+  /// Server-generated. A client never chooses where its document is stored.
   originalStorageKey String            @unique
+  /// A derivative kept separate from the protected original (feature 127).
   previewStorageKey  String?
   originalFileName   String
   mimeType           String
   fileSize           Int
+  /// Computed by the server from the bytes it received, never accepted from a client.
   sha256             String
   storageProvider    String
+  storageBucket      String?
   uploadedAt         DateTime          @default(now())
+  /// When the API took custody of the bytes. Null only on legacy rows that
+  /// recorded a document which was never actually stored.
+  serverReceivedAt   DateTime?
   verification       VoterVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
 
   @@index([verificationId])

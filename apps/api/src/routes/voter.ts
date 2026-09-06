@@ -18,6 +18,14 @@ import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
 import { requireAuth, requireMemberCapability } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
+import {
+  MAX_VOTER_DOCUMENT_BYTES,
+  VOTER_DOCUMENT_MIME_TYPES,
+  VoterDocumentRejected,
+  storeVoterDocument,
+  withVoterDocumentCustody,
+  voterDocumentSubmissionSchema,
+} from "../lib/voter-document-storage";
 import { createAuditLog } from "../lib/audit";
 import { recordParticipationAndReward } from "../lib/participation";
 import { valuePayout } from "../lib/payout-authority";
@@ -81,20 +89,7 @@ const verificationUploadRequestSchema = z.object({
   fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
 });
 
-const verificationSubmitSchema = verificationUploadRequestSchema.extend({
-  originalStorageKey: z
-    .string()
-    .trim()
-    .min(20)
-    .max(500)
-    .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
-  previewStorageKey: z
-    .string()
-    .trim()
-    .max(500)
-    .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
-    .optional(),
-  sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
+const verificationSubmitSchema = voterDocumentSubmissionSchema.extend({
   documentProcessingConsent: z.boolean(),
 });
 
@@ -342,13 +337,20 @@ router.post("/verification/upload-request", requireAuth, requireMemberCapability
     return response.status(400).json({ message: "Invalid verification upload request.", errors: parsed.error.flatten() });
   }
 
-  return response.status(201).json({
-    storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
-    storageKey: `voter-verification/${request.authUser!.id}/${crypto.randomUUID()}`,
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    maxFileSize: 8 * 1024 * 1024,
-    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
-    note: "Workstream 4 owns the signed upload implementation; this contract deliberately returns a private object key, not a public URL.",
+  /**
+   * What may be uploaded, and nothing about where.
+   *
+   * This used to hand the caller a storage key and a stub provider, deferring
+   * the real upload to a workstream that never arrived — which is how a client
+   * came to be authoritative for the location of its own identity document.
+   * The document is submitted to /verification/submit, and the server decides
+   * where it lives.
+   */
+  return response.status(200).json({
+    maxFileSize: MAX_VOTER_DOCUMENT_BYTES,
+    allowedMimeTypes: VOTER_DOCUMENT_MIME_TYPES,
+    transport: "SUBMIT_DOCUMENT_BYTES",
+    note: "Submit the document to /voter/verification/submit. The server generates the private storage key and computes the hash.",
   });
 });
 
@@ -362,8 +364,26 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
     return response.status(400).json({ message: "Document processing consent is required before submitting voter evidence." });
   }
 
+  // Custody of the bytes is taken before any record is written, so a record can
+  // never name an object that is not there.
+  let storedDocument;
+  try {
+    storedDocument = await storeVoterDocument({
+      submission: parsed.data,
+      memberUserId: request.authUser!.id,
+    });
+  } catch (caught) {
+    if (caught instanceof VoterDocumentRejected) {
+      return response.status(caught.status).json({ message: caught.message, code: caught.code });
+    }
+    throw caught;
+  }
+
   const voterIdentifier = request.authUser!.voterProfile!.voterCardNumber;
-  const result = await prisma.$transaction(async (transaction) => {
+  const result = await withVoterDocumentCustody(
+    { stored: storedDocument, actorUserId: request.authUser!.id, committed: (value) => value !== null },
+    () =>
+      prisma.$transaction(async (transaction) => {
     const existingVerification = await transaction.voterVerification.findUnique({
       where: { memberUserId: request.authUser!.id },
       include: { documents: true },
@@ -375,7 +395,7 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
 
     const duplicateDocument = await transaction.voterVerificationDocument.findFirst({
       where: {
-        sha256: parsed.data.sha256.toLowerCase(),
+        sha256: storedDocument.sha256,
         verification: {
           memberUserId: { not: request.authUser!.id },
         },
@@ -410,14 +430,18 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
 
     await transaction.voterVerificationDocument.create({
       data: {
+        id: storedDocument.documentId,
         verificationId: verification.id,
-        originalStorageKey: parsed.data.originalStorageKey,
-        previewStorageKey: parsed.data.previewStorageKey || null,
-        originalFileName: parsed.data.originalFileName,
-        mimeType: parsed.data.mimeType,
-        fileSize: parsed.data.fileSize,
-        sha256: parsed.data.sha256.toLowerCase(),
-        storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+        originalStorageKey: storedDocument.originalStorageKey,
+        previewStorageKey: null,
+        originalFileName: storedDocument.originalFileName,
+        mimeType: storedDocument.mimeType,
+        // Derived from the bytes the server stored, never from the submission.
+        fileSize: storedDocument.fileSize,
+        sha256: storedDocument.sha256,
+        storageProvider: storedDocument.storageProvider,
+        storageBucket: storedDocument.storageBucket,
+        serverReceivedAt: storedDocument.serverReceivedAt,
       },
     });
 
@@ -446,12 +470,13 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
         history: { orderBy: { createdAt: "desc" } },
       },
     });
-  }).catch((error: unknown) => {
+      }).catch((error: unknown) => {
     if (error instanceof Error && error.message === "VERIFICATION_ALREADY_APPROVED") {
       return null;
     }
     throw error;
-  });
+      }),
+  );
 
   if (!result) {
     return response.status(409).json({ message: "Approved voter verification cannot be resubmitted." });
