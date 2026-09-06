@@ -876,3 +876,188 @@
 .panel-inset {
   padding: var(--sp-4);
 }
+
+/* ---- The call ----------------------------------------------------------
+ * A call takes over, because it is the only thing happening. It is not a panel
+ * on one page: the overlay is mounted above the whole application, so an
+ * incoming call reaches an operator wherever they are.
+ */
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: color-mix(in srgb, var(--navy) 72%, transparent);
+  backdrop-filter: blur(6px);
+  animation: call-fade var(--dur) var(--ease);
+}
+
+@keyframes call-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.call-card {
+  width: min(26rem, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-7) var(--sp-5) var(--sp-5);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--e-3);
+}
+
+.call-card-state {
+  font-size: var(--fs-100);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.call-card-name {
+  font-size: var(--fs-600);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.call-card-role {
+  font-size: var(--fs-200);
+  color: var(--muted);
+}
+
+.call-card-timer {
+  font-family: var(--font-mono);
+  font-size: var(--fs-500);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* Three dots that breathe while a call is not yet connected, so "calling" is
+   visibly live rather than a word that might be stuck. */
+.call-card-pulse {
+  display: inline-flex;
+  gap: var(--sp-2);
+  height: 1.75rem;
+  align-items: center;
+}
+
+.call-card-pulse i {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  animation: call-pulse 1.2s var(--ease) infinite;
+}
+
+.call-card-pulse i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.call-card-pulse i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes call-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-0.25rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-card-pulse i {
+    animation: none;
+    opacity: 0.6;
+  }
+  .call-overlay {
+    animation: none;
+  }
+}
+
+.call-card-error {
+  margin: 0;
+  font-size: var(--fs-200);
+  color: var(--state-error);
+}
+
+.call-card-note {
+  font-size: var(--fs-100);
+  color: var(--muted);
+}
+
+.call-card-actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.call-btn {
+  min-width: 7rem;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-300);
+  font-weight: var(--fw-semibold);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-sunken);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.call-btn:hover {
+  background: var(--surface-raised);
+}
+
+.call-btn-accept {
+  background: var(--flag-green);
+  border-color: var(--flag-green);
+  color: var(--text-inverse);
+}
+
+.call-btn-accept:hover {
+  filter: brightness(1.08);
+}
+
+.call-btn-end {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse);
+}
+
+.call-btn-end:hover {
+  filter: brightness(1.08);
+}
+
+.call-btn-muted {
+  background: var(--state-refused-bg);
+  border-color: var(--state-refused);
+  color: var(--state-refused);
+}
+
+@media (max-width: 480px) {
+  .call-card-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  .call-btn {
+    width: 100%;
+  }
+}

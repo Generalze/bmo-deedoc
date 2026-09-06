@@ -488,7 +488,7 @@ export default function ElectionSituationRoomPage() {
                     ),
                   },
                   { label: "Recording", value: "disabled" },
-                  { label: "Call history", value: "Durable history is blocked pending schema review." },
+                  { label: "Call history", value: "Durable — every call and lifecycle event is recorded." },
                 ]}
               />
             </Panel>

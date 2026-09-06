@@ -92,7 +92,7 @@ function getApiBaseUrl(): string {
   throw new Error("Missing NEXT_PUBLIC_API_BASE_URL for production build.");
 }
 
-const API_BASE_URL = getApiBaseUrl();
+export const API_BASE_URL = getApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;
