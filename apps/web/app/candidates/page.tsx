@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CANDIDATE_OFFICE_TYPES, type CandidateOfficeType, type CandidatePublicListItem, type PoliticalPartyItem, type StateItem } from "@pics-nigeria/shared";
 import { ApiError, fetchPublicCandidates, fetchPublicParties, fetchPublicStates } from "../../lib/api";
+import {
+  Kpi,
+  KpiRow,
+  Notice,
+  PageHead,
+  Panel,
+  StateView,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarField,
+  formatCount,
+} from "../../components/ui";
 
 const officeLabels: Record<string, string> = {
   PRESIDENTIAL: "Presidential",
@@ -135,160 +147,169 @@ export default function CandidatesPage() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero candidate-discovery-hero">
-        <h1>Candidate Directory</h1>
-        <p>Search published candidate profiles, compare offices, and browse campaign materials by territory and party.</p>
-        <div className="candidate-filter-row">
-          <label className="field">
-            <span>Search by name</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search candidates" />
-          </label>
-          <label className="field">
-            <span>State</span>
-            <select value={stateId} onChange={(event) => setStateId(event.target.value)}>
-              <option value="">All states</option>
-              {states.map((state) => (
-                <option key={state.id} value={state.id}>
-                  {state.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Party</span>
-            <select value={partyId} onChange={(event) => setPartyId(event.target.value)}>
-              <option value="">All parties</option>
-              <option value="independent">Independent</option>
-              {parties.map((party) => (
-                <option key={party.id} value={party.id}>
-                  {party.code} - {party.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Office</span>
-            <select value={officeType} onChange={(event) => setOfficeType(event.target.value as CandidateOfficeType | "")}>
-              <option value="">All offices</option>
-              {CANDIDATE_OFFICE_TYPES.map((office) => (
-                <option key={office} value={office}>
-                  {officeLabels[office]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="button" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
-            {loading ? "Loading..." : "Apply filters"}
-          </button>
-          <button className="button secondary" type="button" onClick={() => handleClearFilters()} disabled={loading}>
-            Clear filters
-          </button>
-        </div>
-        <p className="muted">
-          Browse by party or jump to the <Link href="/parties">party portfolio</Link>.
-        </p>
-        {search || stateId || partyId || officeType ? (
-          <div className="badge-row">
-            {search ? <span className="status-badge live">Search: {search}</span> : null}
-            {selectedStateName ? <span className="status-badge live">State: {selectedStateName}</span> : null}
-            {selectedPartyName ? <span className="status-badge live">Party: {selectedPartyName}</span> : null}
-            {officeType ? <span className="status-badge live">Office: {officeLabels[officeType]}</span> : null}
-          </div>
-        ) : null}
-        {error ? <p className="error">{error}</p> : null}
-      </section>
+    <main className="console-shell">
+      <PageHead
+        title="Candidate directory"
+        lead="Search published candidate profiles, compare offices, and browse campaign materials by territory and party."
+        actions={
+          <Link className="btn" href="/parties">
+            Party portfolio
+          </Link>
+        }
+      />
 
-      {!loading ? (
-        <section className="grid stats" style={{ marginTop: 24 }}>
-          <article className="panel card">
-            <h2>Visible candidates</h2>
-            <div className="value">{candidates.length}</div>
-          </article>
-          <article className="panel card">
-            <h2>States in result</h2>
-            <div className="value">{visibleStateCount}</div>
-          </article>
-          <article className="panel card">
-            <h2>INEC-listed parties</h2>
-            <div className="value">{approvedPartyCount}</div>
-          </article>
-        </section>
-      ) : null}
+      <div className="stack-4">
+        {error ? <Notice tone="error" title="Could not load the directory">{error}</Notice> : null}
 
-      {!loading && candidates.length > 0 ? (
-        <section className="panel card" style={{ marginTop: 24 }}>
-          <div className="section-head">
-            <div>
-              <h2>Office coverage</h2>
-              <p className="muted">Quick view of the published candidates currently matching your filters.</p>
-            </div>
-          </div>
-          <div className="action-row" style={{ flexWrap: "wrap" }}>
-            {Object.entries(officeBreakdown).map(([office, count]) => (
-              <button
-                key={office}
-                className="button secondary"
-                type="button"
-                onClick={() => {
-                  setOfficeType(office as CandidateOfficeType);
-                  void loadDirectory(search, stateId, partyId, office as CandidateOfficeType);
-                }}
+        <Panel title="Find a candidate" flush>
+          <Toolbar>
+            <ToolbarField label="Search by name" hideLabel>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search candidates"
+              />
+            </ToolbarField>
+            <ToolbarField label="State">
+              <select value={stateId} onChange={(event) => setStateId(event.target.value)}>
+                <option value="">All states</option>
+                {states.map((state) => (
+                  <option key={state.id} value={state.id}>
+                    {state.name}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Party">
+              <select value={partyId} onChange={(event) => setPartyId(event.target.value)}>
+                <option value="">All parties</option>
+                <option value="independent">Independent</option>
+                {parties.map((party) => (
+                  <option key={party.id} value={party.id}>
+                    {party.code} — {party.name}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarField label="Office">
+              <select
+                value={officeType}
+                onChange={(event) => setOfficeType(event.target.value as CandidateOfficeType | "")}
               >
-                {officeLabels[office] || office} ({count})
+                <option value="">All offices</option>
+                {CANDIDATE_OFFICE_TYPES.map((office) => (
+                  <option key={office} value={office}>
+                    {officeLabels[office]}
+                  </option>
+                ))}
+              </select>
+            </ToolbarField>
+            <ToolbarEnd>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
+                {loading ? "Loading…" : "Apply"}
               </button>
+              <button className="btn btn-sm" type="button" onClick={() => handleClearFilters()} disabled={loading}>
+                Clear
+              </button>
+            </ToolbarEnd>
+          </Toolbar>
+
+          {search || stateId || partyId || officeType ? (
+            <div className="panel-body cluster">
+              {search ? <span className="pill pill-pending">Search: {search}</span> : null}
+              {selectedStateName ? <span className="pill pill-pending">State: {selectedStateName}</span> : null}
+              {selectedPartyName ? <span className="pill pill-pending">Party: {selectedPartyName}</span> : null}
+              {officeType ? <span className="pill pill-pending">Office: {officeLabels[officeType]}</span> : null}
+            </div>
+          ) : null}
+        </Panel>
+
+        {!loading ? (
+          <KpiRow>
+            <Kpi label="Visible candidates" value={formatCount(candidates.length)} note="Matching your filters" />
+            <Kpi label="States in result" value={formatCount(visibleStateCount)} />
+            <Kpi label="INEC-listed parties" value={formatCount(approvedPartyCount)} />
+          </KpiRow>
+        ) : null}
+
+        {!loading && candidates.length > 0 ? (
+          <Panel title="Office coverage" meta="Select one to filter">
+            <div className="cluster">
+              {Object.entries(officeBreakdown).map(([office, count]) => (
+                <button
+                  key={office}
+                  className={officeType === office ? "btn btn-sm btn-primary" : "btn btn-sm"}
+                  type="button"
+                  aria-pressed={officeType === office}
+                  onClick={() => {
+                    setOfficeType(office as CandidateOfficeType);
+                    void loadDirectory(search, stateId, partyId, office as CandidateOfficeType);
+                  }}
+                >
+                  {officeLabels[office] || office} ({count})
+                </button>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
+
+        {loading ? (
+          <StateView kind="loading" title="Loading candidate directory…" />
+        ) : candidates.length === 0 ? (
+          <StateView
+            kind="empty"
+            title="No published candidates found"
+            detail="Try widening your filters, or return when more campaign profiles are published."
+          />
+        ) : (
+          /* A directory of people, each with a portrait. Cards are the right
+             shape for choosing between them. */
+          <div className="candidate-grid">
+            {candidates.map((candidate) => (
+              <article key={candidate.userId} className="candidate-card">
+                {candidate.portraitUrl ? (
+                  <img src={candidate.portraitUrl} alt={`${candidate.name} portrait`} className="candidate-card-media" />
+                ) : (
+                  <div className="candidate-card-media fallback">{candidate.name.slice(0, 1)}</div>
+                )}
+                <div className="candidate-card-body">
+                  <p className="kpi-label">{officeLabels[candidate.officeType] || candidate.officeType}</p>
+                  <h2>{candidate.name}</h2>
+                  <p className="muted-text">{candidate.party?.name || "Independent / party not listed"}</p>
+                  <p>{candidate.campaignSlogan || candidate.bio || "Campaign profile coming soon."}</p>
+                  <p className="muted-text">
+                    {[
+                      candidate.territoryLabels.state || "Ogun State",
+                      candidate.territoryLabels.senatorialDistrict,
+                      candidate.territoryLabels.federalConstituency,
+                      candidate.territoryLabels.stateConstituency,
+                      candidate.territoryLabels.lga,
+                      candidate.territoryLabels.ward,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  <p className="cluster">
+                    {candidate.party?.code ? <span className="pill pill-stale">{candidate.party.code}</span> : null}
+                    {candidate.party?.isApprovedByInec ? <span className="pill pill-executed">INEC listed</span> : null}
+                  </p>
+                  <div className="btn-row">
+                    <Link className="btn btn-sm" href={`/candidates/${candidate.userId}`}>
+                      View profile
+                    </Link>
+                    {candidate.party ? (
+                      <Link className="btn btn-sm" href={`/parties/${candidate.party.id}`}>
+                        View party
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
             ))}
           </div>
-        </section>
-      ) : null}
-
-      {loading ? (
-        <section className="panel card">
-          <p>Loading candidate directory...</p>
-        </section>
-      ) : candidates.length === 0 ? (
-        <section className="panel card empty-state">
-          <h2>No published candidates found</h2>
-          <p className="muted">Try widening your filters or return when more campaign profiles are published.</p>
-        </section>
-      ) : (
-        <section className="candidate-grid">
-          {candidates.map((candidate) => (
-            <article key={candidate.userId} className="panel card candidate-card">
-              {candidate.portraitUrl ? (
-                <img src={candidate.portraitUrl} alt={`${candidate.name} portrait`} className="candidate-card-media" />
-              ) : (
-                <div className="candidate-card-media fallback">{candidate.name.slice(0, 1)}</div>
-              )}
-              <div className="candidate-card-body">
-                <p className="eyebrow">{officeLabels[candidate.officeType] || candidate.officeType}</p>
-                <h2>{candidate.name}</h2>
-                <p className="muted">{candidate.party?.name || "Independent / party not listed"}</p>
-                {candidate.party?.isApprovedByInec ? <p className="muted">INEC listed party</p> : null}
-                <p>{candidate.campaignSlogan || candidate.bio || "Campaign profile coming soon."}</p>
-                <p className="muted">
-                  {[
-                    candidate.territoryLabels.state || "National",
-                    candidate.territoryLabels.senatorialDistrict,
-                    candidate.territoryLabels.federalConstituency,
-                    candidate.territoryLabels.stateConstituency,
-                    candidate.territoryLabels.lga,
-                    candidate.territoryLabels.ward,
-                  ].filter(Boolean).join(" | ")}
-                </p>
-                <div className="badge-row">
-                  <span className="status-badge live">{candidate.territoryLabels.state || "National"}</span>
-                  {candidate.party?.code ? <span className="status-badge live">{candidate.party.code}</span> : null}
-                </div>
-                <div className="action-row">
-                  <Link href={`/candidates/${candidate.userId}`}>View profile</Link>
-                  {candidate.party ? <Link href={`/parties/${candidate.party.id}`}>View party</Link> : null}
-                </div>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
+        )}
+      </div>
     </main>
   );
 }
