@@ -16,6 +16,7 @@
     "bootstrap:polling-units:national": "tsx scripts/bootstrap-national-polling-units.ts",
     "import:reference:ogun": "tsx scripts/import-ogun-reference-release.ts",
     "validate:reference:ogun-release": "tsx scripts/import-ogun-reference-release.ts --validate-only",
+    "bootstrap:staging-personas": "tsx scripts/bootstrap-staging-personas.ts",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
     "verify:reference-completeness": "tsx scripts/verify-reference-completeness.ts",
     "verify:reference:ogun": "tsx scripts/verify-ogun-reference.ts",

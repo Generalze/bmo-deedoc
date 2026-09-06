@@ -24,6 +24,8 @@
     "prisma:ensure-production": "npm run prisma:ensure-production --workspace @pics-nigeria/database",
     "bootstrap:reference-data": "npm run bootstrap:reference-data --workspace @pics-nigeria/database",
     "bootstrap:super-admin": "npm run bootstrap:super-admin --workspace @pics-nigeria/database",
+    "bootstrap:staging-personas": "npm run bootstrap:staging-personas --workspace @pics-nigeria/database",
+    "smoke:deployment": "node scripts/smoke-test-deployment.mjs",
     "verify:production": "npm run verify:production --workspace @pics-nigeria/database",
     "seed": "npm run seed --workspace @pics-nigeria/database",
     "seed:credentials": "npm run seed:credentials --workspace @pics-nigeria/database",
