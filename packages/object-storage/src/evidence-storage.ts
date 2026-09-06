@@ -317,3 +317,26 @@ export function setEvidenceObjectStorageForTests(next: EvidenceObjectStorage | n
   }
   storage = next;
 }
+
+/**
+ * The same private bucket, addressed for a different kind of record.
+ *
+ * Voter-registration documents and incident evidence share one private
+ * S3-compatible bucket and one client; they are separated by key prefix, not by
+ * credentials. This alias exists so a caller storing a voter's PVC does not
+ * have to read as though it were storing incident evidence, and so the shared
+ * bucket is visible rather than implied.
+ *
+ * Neither kind of object is ever public. There is no public-read path on this
+ * client at all: reads go through createSignedGetUrl with an explicit, short
+ * expiry.
+ */
+export function getPrivateObjectStorage() {
+  return getEvidenceObjectStorage();
+}
+
+/** Key prefixes that keep the two domains apart inside the shared bucket. */
+export const PRIVATE_STORAGE_PREFIXES = {
+  evidence: "evidence",
+  voterVerification: "voter-verification",
+} as const;

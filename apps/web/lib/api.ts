@@ -148,11 +148,10 @@ export async function registerVoterUser(body: {
   confirmAdult: true;
   consentVersion?: string;
   voterDocument?: {
-    originalStorageKey: string;
     originalFileName: string;
     mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
-    fileSize: number;
-    sha256: string;
+    /** Base64 document bytes. The server owns the key, the size and the hash. */
+    content: string;
   };
 }): Promise<{ message: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
@@ -387,11 +386,10 @@ export async function submitMyPreElectionVerificationDocument(
   body: {
     documentProcessingConsent: true;
     voterDocument: {
-      originalStorageKey: string;
       originalFileName: string;
       mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
-      fileSize: number;
-      sha256: string;
+      /** Base64 document bytes. The server owns the key, the size and the hash. */
+      content: string;
     };
   },
 ) {
@@ -450,7 +448,14 @@ export async function accessPreElectionVerificationDocument(token: string, verif
   const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/documents/${documentId}/access`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return readJson<{ storageProvider: string; storageKey: string; accessToken: string; expiresAt: string }>(response);
+  return readJson<{
+    storageProvider: string;
+    storageKey: string;
+    /** Short-lived signed URL. There is no permanent public document URL. */
+    url: string;
+    expiresAt: string;
+    verifiedSha256: string;
+  }>(response);
 }
 
 export async function decidePreElectionVerification(

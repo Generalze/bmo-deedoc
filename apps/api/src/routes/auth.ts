@@ -13,6 +13,11 @@ import { signAccessToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
+import {
+  VoterDocumentRejected,
+  storeVoterDocument,
+  voterDocumentSubmissionSchema,
+} from "../lib/voter-document-storage";
 import { syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { deriveMemberAncestryFromWard, MemberAncestryError } from "../lib/member-ancestry";
 import { validateTerritoryReferences } from "../lib/territory";
@@ -61,26 +66,7 @@ const registerVoterSchema = z.object({
   documentProcessingConsent: z.boolean().optional(),
   confirmAdult: z.boolean().optional(),
   consentVersion: z.string().trim().max(50).optional(),
-  voterDocument: z
-    .object({
-      originalStorageKey: z
-        .string()
-        .trim()
-        .min(20)
-        .max(500)
-        .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
-      previewStorageKey: z
-        .string()
-        .trim()
-        .max(500)
-        .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
-        .optional(),
-      originalFileName: z.string().trim().min(1).max(255),
-      mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-      fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
-      sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
-    })
-    .optional(),
+  voterDocument: voterDocumentSubmissionSchema.optional(),
 });
 
 router.post("/login", async (request, response) => {
@@ -480,6 +466,30 @@ router.post("/register-voter", async (request, response) => {
   const referralCode = await generateUniqueReferralCode();
   const passwordHash = await hashPassword(parsed.data.password);
 
+  /**
+   * Custody of the document is taken before the account exists.
+   *
+   * If storage refuses, the registration is refused with it. The alternative —
+   * creating the member and recording a document that was never stored — is the
+   * state this replaces, and it is worse than asking someone to try again.
+   */
+  let storedDocument: Awaited<ReturnType<typeof storeVoterDocument>> | null = null;
+  if (parsed.data.voterDocument) {
+    try {
+      storedDocument = await storeVoterDocument({
+        submission: parsed.data.voterDocument,
+        // The account does not exist yet; the document is attributed to the
+        // verification it is about to be attached to.
+        memberUserId: "pending-registration",
+      });
+    } catch (caught) {
+      if (caught instanceof VoterDocumentRejected) {
+        return response.status(caught.status).json({ message: caught.message, code: caught.code });
+      }
+      throw caught;
+    }
+  }
+
   let createdUser;
   try {
     createdUser = await prisma.$transaction(async (transaction) => {
@@ -537,10 +547,12 @@ router.post("/register-voter", async (request, response) => {
             },
           });
 
-      const duplicateDocument = parsed.data.voterDocument
+      const duplicateDocument = storedDocument
         ? await transaction.voterVerificationDocument.findFirst({
             where: {
-              sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+              // The server's hash of the bytes it stored. Comparing a
+              // client-supplied hash made this check both evadable and abusable.
+              sha256: storedDocument.sha256,
               verification: {
                 memberUserId: { not: user.id },
               },
@@ -553,20 +565,25 @@ router.post("/register-voter", async (request, response) => {
         data: {
           memberUserId: user.id,
           voterIdentifier: voterCardNumber,
-          status: parsed.data.voterDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
+          status: storedDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
           isFlagged: Boolean(duplicateDocument),
           fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
-          submittedAt: parsed.data.voterDocument ? new Date() : null,
-          documents: parsed.data.voterDocument
+          submittedAt: storedDocument ? storedDocument.serverReceivedAt : null,
+          documents: storedDocument
             ? {
                 create: {
-                  originalStorageKey: parsed.data.voterDocument.originalStorageKey,
-                  previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
-                  originalFileName: parsed.data.voterDocument.originalFileName,
-                  mimeType: parsed.data.voterDocument.mimeType,
-                  fileSize: parsed.data.voterDocument.fileSize,
-                  sha256: parsed.data.voterDocument.sha256.toLowerCase(),
-                  storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+                  id: storedDocument.documentId,
+                  originalStorageKey: storedDocument.originalStorageKey,
+                  previewStorageKey: null,
+                  originalFileName: storedDocument.originalFileName,
+                  mimeType: storedDocument.mimeType,
+                  // Derived from the bytes the server received, never asserted
+                  // by the registering client.
+                  fileSize: storedDocument.fileSize,
+                  sha256: storedDocument.sha256,
+                  storageProvider: storedDocument.storageProvider,
+                  storageBucket: storedDocument.storageBucket,
+                  serverReceivedAt: storedDocument.serverReceivedAt,
                 },
               }
             : undefined,
@@ -579,7 +596,7 @@ router.post("/register-voter", async (request, response) => {
           actorUserId: user.id,
           fromStatus: null,
           toStatus: verification.status,
-          decision: parsed.data.voterDocument
+          decision: storedDocument
             ? duplicateDocument
               ? VoterVerificationDecision.FLAGGED
               : VoterVerificationDecision.SUBMITTED

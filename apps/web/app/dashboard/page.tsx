@@ -52,11 +52,21 @@ import {
 } from "../../components/ui";
 import { clearSession, readSession } from "../../lib/session";
 
-async function sha256File(file: File) {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+/**
+ * The document itself, not a description of it.
+ *
+ * This previously hashed the file locally and sent the hash with an invented
+ * storage key, while the bytes went nowhere. The server now receives the
+ * document and derives the key, the size and the hash from it.
+ */
+async function fileToBase64(file: File) {
+  const buffer = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < buffer.length; index += chunkSize) {
+    binary += String.fromCharCode(...buffer.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function safeStorageName(fileName: string) {
@@ -224,11 +234,9 @@ export default function DashboardPage() {
       const result = await submitMyPreElectionVerificationDocument(token, {
         documentProcessingConsent: true,
         voterDocument: {
-          originalStorageKey: `voter-verification/client/${crypto.randomUUID()}-${safeStorageName(verificationDocument.name)}`,
           originalFileName: verificationDocument.name,
           mimeType: verificationDocument.type as "image/jpeg" | "image/png" | "image/webp" | "application/pdf",
-          fileSize: verificationDocument.size,
-          sha256: await sha256File(verificationDocument),
+          content: await fileToBase64(verificationDocument),
         },
       });
       setMessage(result.message);

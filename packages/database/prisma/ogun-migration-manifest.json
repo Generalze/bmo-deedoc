@@ -73,6 +73,10 @@
     {
       "name": "20260903090000_ward_constituency_edge_governance",
       "sha256": "a0cc7b15a7e909a884f71ad552979e27c35907c09552834c642f9b33dd0f8dcc"
+    },
+    {
+      "name": "20260906120000_voter_document_private_storage",
+      "sha256": "4898f34778773c3d582721e4107dd2a6aa14905af3d40cf059f46036bafa79d6"
     }
   ]
 }
