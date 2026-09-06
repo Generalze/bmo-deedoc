@@ -1,6 +1,13 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { PRIVATE_STORAGE_PREFIXES, getPrivateObjectStorage } from "@pics-nigeria/object-storage";
+import { prisma } from "../prisma";
+import { createAuditLog } from "./audit";
+import {
+  PRIVATE_STORAGE_PREFIXES,
+  discardPendingObject,
+  getPrivateObjectStorage,
+  promotePendingObject,
+} from "@pics-nigeria/object-storage";
 
 /**
  * The single authority for taking custody of a voter-registration document.
@@ -45,6 +52,12 @@ export type VoterDocumentSubmission = z.infer<typeof voterDocumentSubmissionSche
 
 export type StoredVoterDocument = {
   documentId: string;
+  /**
+   * Where the bytes are right now: inside the pending namespace, owned by no
+   * committed row. Promotion moves them to originalStorageKey.
+   */
+  pendingStorageKey: string;
+  /** Where the committed row points, and where the bytes end up. */
   originalStorageKey: string;
   originalFileName: string;
   mimeType: string;
@@ -67,14 +80,20 @@ export class VoterDocumentRejected extends Error {
 }
 
 /**
- * Server-owned object key. The document id is generated here, so one member
+ * Server-owned object keys. The document id is generated here, so one member
  * cannot name another member's object and two submissions cannot collide.
+ *
+ * Two keys, one document: the bytes land in the pending namespace and move to
+ * the committed key only after the row that owns them exists.
  */
-function voterDocumentObjectKey(documentId: string, fileName: string, now: Date) {
+function voterDocumentObjectKeys(documentId: string, fileName: string, now: Date) {
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `${PRIVATE_STORAGE_PREFIXES.voterVerification}/${year}/${month}/${documentId}-${safeName}`;
+  return {
+    pendingStorageKey: `${PRIVATE_STORAGE_PREFIXES.voterVerificationPending}/${documentId}-${safeName}`,
+    originalStorageKey: `${PRIVATE_STORAGE_PREFIXES.voterVerification}/${year}/${month}/${documentId}-${safeName}`,
+  };
 }
 
 /**
@@ -128,17 +147,21 @@ export async function storeVoterDocument(input: {
 
   const serverReceivedAt = new Date();
   const documentId = crypto.randomUUID();
-  const originalStorageKey = voterDocumentObjectKey(documentId, input.submission.originalFileName, serverReceivedAt);
+  const { pendingStorageKey, originalStorageKey } = voterDocumentObjectKeys(
+    documentId,
+    input.submission.originalFileName,
+    serverReceivedAt,
+  );
   const sha256 = crypto.createHash("sha256").update(body).digest("hex");
   const storage = getPrivateObjectStorage();
 
   let stored;
   try {
     stored = await storage.putObjectIfAbsent({
-      key: originalStorageKey,
+      key: pendingStorageKey,
       body,
       contentType: input.submission.mimeType,
-      metadata: { documentId, sha256, memberUserId: input.memberUserId },
+      metadata: { documentId, sha256, memberUserId: input.memberUserId, custody: "pending" },
     });
   } catch {
     // Refuse the submission rather than record a document that is not stored.
@@ -159,6 +182,7 @@ export async function storeVoterDocument(input: {
 
   return {
     documentId,
+    pendingStorageKey,
     originalStorageKey,
     originalFileName: input.submission.originalFileName,
     mimeType: input.submission.mimeType,
@@ -168,4 +192,124 @@ export async function storeVoterDocument(input: {
     storageBucket: storage.bucket,
     serverReceivedAt,
   };
+}
+
+
+/**
+ * The registration or submission transaction committed. Move the bytes to the
+ * key that row points at.
+ *
+ * Called after commit, deliberately. Promoting first and rolling back would
+ * leave a committed object no cleanup path may delete — which is the state this
+ * whole model exists to prevent.
+ *
+ * A failure here is recoverable rather than silent: the row exists, the access
+ * route already refuses a missing object with an audited reason, and the bytes
+ * are still in the pending namespace to be promoted again.
+ */
+export async function commitVoterDocument(stored: StoredVoterDocument): Promise<void> {
+  await promotePendingObject({
+    pendingKey: stored.pendingStorageKey,
+    committedKey: stored.originalStorageKey,
+  });
+}
+
+/**
+ * The transaction failed. Remove the bytes nothing owns.
+ *
+ * Returns whether the object is actually gone. A caller must not report a clean
+ * rollback while identity-document bytes are still retained, so the failure is
+ * surfaced rather than swallowed.
+ */
+export async function discardVoterDocument(stored: StoredVoterDocument): Promise<{ discarded: boolean; error?: string }> {
+  try {
+    await discardPendingObject(stored.pendingStorageKey);
+    return { discarded: true };
+  } catch (caught) {
+    return { discarded: false, error: caught instanceof Error ? caught.message : String(caught) };
+  }
+}
+
+
+/**
+ * Runs a submission transaction with the document's custody attached to its
+ * outcome.
+ *
+ * The bytes are already in the pending namespace, owned by nothing. Either the
+ * row is committed and they are promoted to the key it names, or they are
+ * discarded — a submission that did not take effect must not retain someone's
+ * identity document.
+ *
+ * `committed` exists because "did not throw" is not the same as "committed".
+ * Both submission transactions convert some failures into a returned value: one
+ * returns null when the verification is already approved, the other returns the
+ * Error itself. Treating either as success would promote an object that no row
+ * points at — the same orphan, moved to a different key. The caller states what
+ * commitment looks like, and the default only accepts a non-null result.
+ */
+export async function withVoterDocumentCustody<T>(
+  options: {
+    stored: StoredVoterDocument;
+    actorUserId: string;
+    committed?: (result: T) => boolean;
+  },
+  run: () => Promise<T>,
+): Promise<T> {
+  const committed = options.committed ?? ((result: T) => result !== null && result !== undefined);
+
+  let result: T;
+  try {
+    result = await run();
+  } catch (caught) {
+    await cleanUpAfterFailure(options.stored, options.actorUserId);
+    throw caught;
+  }
+
+  if (!committed(result)) {
+    await cleanUpAfterFailure(options.stored, options.actorUserId);
+    return result;
+  }
+
+  // After commit, deliberately. Promoting first and then rolling back would
+  // strand a committed object that no cleanup path is permitted to delete.
+  try {
+    await commitVoterDocument(options.stored);
+  } catch (promotionError) {
+    await createAuditLog(prisma, {
+      actorUserId: options.actorUserId,
+      action: "VERIFICATION_DOCUMENT_PROMOTION_FAILED",
+      targetType: "VoterVerificationDocument",
+      targetId: options.stored.documentId,
+      metadata: {
+        pendingStorageKey: options.stored.pendingStorageKey,
+        committedStorageKey: options.stored.originalStorageKey,
+        reason: promotionError instanceof Error ? promotionError.message : String(promotionError),
+        consequence: "The document record exists; access refuses until the object is promoted.",
+      },
+    }).catch(() => undefined);
+  }
+
+  return result;
+}
+
+async function cleanUpAfterFailure(stored: StoredVoterDocument, actorUserId: string) {
+  const cleanup = await discardVoterDocument(stored);
+  if (cleanup.discarded) {
+    return;
+  }
+  // Never reported as a clean rollback: the bytes are still there.
+  await createAuditLog(prisma, {
+    actorUserId,
+    action: "VERIFICATION_DOCUMENT_ORPHAN_CLEANUP_FAILED",
+    targetType: "VoterVerificationDocument",
+    targetId: stored.documentId,
+    metadata: {
+      pendingStorageKey: stored.pendingStorageKey,
+      reason: cleanup.error || "unknown",
+      consequence: "Identity-document bytes remain in the pending namespace and must be removed.",
+    },
+  }).catch(() => undefined);
+  console.error(
+    `voter_document_orphan documentId=${stored.documentId} pendingStorageKey=${stored.pendingStorageKey} reason=${cleanup.error || "unknown"}`,
+  );
 }

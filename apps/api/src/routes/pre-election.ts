@@ -31,6 +31,7 @@ import { createAuditLog } from "../lib/audit";
 import {
   VoterDocumentRejected,
   storeVoterDocument,
+  withVoterDocumentCustody,
   voterDocumentSubmissionSchema,
 } from "../lib/voter-document-storage";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
@@ -799,7 +800,10 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
     throw caught;
   }
 
-  const result = await prisma.$transaction(async (transaction) => {
+  const result = await withVoterDocumentCustody(
+    { stored: storedDocument, actorUserId: request.authUser!.id, committed: (value) => !(value instanceof Error) },
+    () =>
+      prisma.$transaction(async (transaction) => {
     const verification = await transaction.voterVerification.findUnique({
       where: { memberUserId: request.authUser!.id },
     });
@@ -880,7 +884,8 @@ router.post("/verifications/me/documents", requireAuth, requireMemberCapability,
     });
 
     return updated;
-  }).catch((error: unknown) => (error instanceof Error ? error : Promise.reject(error)));
+      }).catch((error: unknown) => (error instanceof Error ? error : Promise.reject(error))),
+  );
 
   if (result instanceof Error) {
     if (result.message === "NOT_FOUND") {

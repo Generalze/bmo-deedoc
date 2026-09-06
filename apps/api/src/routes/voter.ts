@@ -23,6 +23,7 @@ import {
   VOTER_DOCUMENT_MIME_TYPES,
   VoterDocumentRejected,
   storeVoterDocument,
+  withVoterDocumentCustody,
   voterDocumentSubmissionSchema,
 } from "../lib/voter-document-storage";
 import { createAuditLog } from "../lib/audit";
@@ -379,7 +380,10 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
   }
 
   const voterIdentifier = request.authUser!.voterProfile!.voterCardNumber;
-  const result = await prisma.$transaction(async (transaction) => {
+  const result = await withVoterDocumentCustody(
+    { stored: storedDocument, actorUserId: request.authUser!.id, committed: (value) => value !== null },
+    () =>
+      prisma.$transaction(async (transaction) => {
     const existingVerification = await transaction.voterVerification.findUnique({
       where: { memberUserId: request.authUser!.id },
       include: { documents: true },
@@ -466,12 +470,13 @@ router.post("/verification/submit", requireAuth, requireMemberCapability, async 
         history: { orderBy: { createdAt: "desc" } },
       },
     });
-  }).catch((error: unknown) => {
+      }).catch((error: unknown) => {
     if (error instanceof Error && error.message === "VERIFICATION_ALREADY_APPROVED") {
       return null;
     }
     throw error;
-  });
+      }),
+  );
 
   if (!result) {
     return response.status(409).json({ message: "Approved voter verification cannot be resubmitted." });
