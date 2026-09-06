@@ -69,6 +69,10 @@
     {
       "name": "20260902120000_backfill_ward_constituency_edge_provenance",
       "sha256": "27105c00a19ba2a23934970211c4e54203f68c6e4a510cf7c4858f014a68a0f9"
+    },
+    {
+      "name": "20260903090000_ward_constituency_edge_governance",
+      "sha256": "a0cc7b15a7e909a884f71ad552979e27c35907c09552834c642f9b33dd0f8dcc"
     }
   ]
 }

@@ -106,3 +106,50 @@ export type OgunReferenceLevelSummary = {
   verified: number;
   blockers: string[];
 };
+
+/**
+ * One inferred Ward -> State Constituency edge awaiting, or carrying, a human
+ * decision. `operational` is the answer the rest of the platform acts on;
+ * `reviewState` is what a reviewer sees.
+ */
+export type InferredEdgeReviewItem = {
+  wardId: string;
+  wardName: string;
+  lga: { id: string; name: string; sourceCode: string | null } | null;
+  stateConstituency: {
+    id: string;
+    name: string;
+    federalConstituency: {
+      id: string;
+      name: string;
+      senatorialDistrict: { id: string; name: string } | null;
+    } | null;
+  } | null;
+  inferred: boolean;
+  inferenceBasis: string | null;
+  referenceReleaseId: string | null;
+  reviewState: "PENDING" | "APPROVED" | "REJECTED";
+  operational: boolean;
+  decision: {
+    outcome: "APPROVED" | "REJECTED";
+    reason: string;
+    decidedAt: string;
+    stateConstituencyId: string;
+    reviewer: { id: string; name: string; email: string } | null;
+  } | null;
+  impact: { members: number; coordinators: number };
+  sourceEvidence: {
+    inecDelimitation: { namespace: string | null; code: string | null; name: string } | null;
+    constituencyWorkbook: { aliases: string[] } | null;
+    constituencySourceCode: { namespace: string | null; code: string | null } | null;
+    note: string;
+  };
+};
+
+export type InferredEdgeReviewSummary = {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  operational: number;
+};

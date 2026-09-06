@@ -28,8 +28,45 @@ import type { Prisma } from "@prisma/client";
  * belongs to.
  */
 export const OPERATIONAL_WARD_EDGE: Prisma.WardWhereInput = {
-  OR: [{ stateConstituencyEdgeInferred: false }, { stateConstituencyEdgeReviewedAt: { not: null } }],
+  OR: [{ stateConstituencyEdgeInferred: false }, { stateConstituencyEdgeApprovedForId: { not: null } }],
 };
+
+/**
+ * The row-level form of the same rule.
+ *
+ * A timestamp is not an approval. Once a rejection also stamps
+ * `stateConstituencyEdgeReviewedAt`, reading that column as authority would let
+ * a human saying "this mapping is wrong" be the thing that makes it
+ * operational — the fail-open inverse of what the review exists for. Authority
+ * is the approved constituency id, and it must equal the edge the ward
+ * actually has:
+ *
+ *   sourced edge                             -> operational
+ *   inferred + approval for this exact edge  -> operational
+ *   inferred + approval for a different edge -> blocked
+ *   inferred + rejected                      -> blocked
+ *   inferred + no decision                   -> blocked
+ *
+ * `OPERATIONAL_WARD_EDGE` above expresses this as a Prisma filter and can only
+ * test the id for null, because Prisma cannot compare two columns of the same
+ * row inside a relation filter. The two agree because the importer clears the
+ * approval whenever it re-points a ward, so a non-null approval always names
+ * the current edge — and a test asserts both encodings select the same wards
+ * rather than trusting that reasoning.
+ */
+export function isWardConstituencyEdgeOperational(ward: {
+  stateConstituencyId: string | null;
+  stateConstituencyEdgeInferred: boolean;
+  stateConstituencyEdgeApprovedForId: string | null;
+}): boolean {
+  if (!ward.stateConstituencyEdgeInferred) {
+    return true;
+  }
+  return (
+    ward.stateConstituencyEdgeApprovedForId !== null &&
+    ward.stateConstituencyEdgeApprovedForId === ward.stateConstituencyId
+  );
+}
 
 export const MEMBER_TERRITORY_LEVELS = [
   "STATE",

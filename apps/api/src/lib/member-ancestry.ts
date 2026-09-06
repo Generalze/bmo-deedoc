@@ -1,5 +1,7 @@
 import { OGUN_STATE_ID } from "@pics-nigeria/shared";
 
+import { isWardConstituencyEdgeOperational } from "./member-territory-scope";
+
 import {
   resolveOperationalTerritory,
   TerritoryAuthorizationError,
@@ -89,7 +91,7 @@ export async function deriveMemberAncestryFromWard(
       lgaId: true,
       stateConstituencyId: true,
       stateConstituencyEdgeInferred: true,
-      stateConstituencyEdgeReviewedAt: true,
+      stateConstituencyEdgeApprovedForId: true,
       lga: { select: { stateId: true } },
     },
   });
@@ -143,7 +145,7 @@ export async function deriveMemberAncestryFromWard(
    * So this fails closed. Refusing a registration is recoverable; a wrongly
    * filed member who looks correctly filed is not.
    */
-  if (ward.stateConstituencyEdgeInferred && !ward.stateConstituencyEdgeReviewedAt) {
+  if (!isWardConstituencyEdgeOperational(ward)) {
     throw new MemberAncestryError(
       "This ward's State Constituency mapping is still awaiting review and cannot yet be used for registration. Contact the platform administrator.",
       "ANCESTRY_EDGE_UNREVIEWED",

@@ -126,6 +126,65 @@ instead.
 action, not an engineering one. Until it happens, those 55 wards cannot register
 members and existing members on them are reported but never repaired.
 
+### The review itself
+
+`POST /governance/inferred-edges/:wardId/approve` and `.../reject`, Super Admin
+only, one edge at a time. There is deliberately no bulk decision: approving 55
+inferences in one action is indistinguishable from not reviewing them.
+
+A decision names the exact State Constituency the reviewer was shown, and the
+server compares it against the ward's current edge before recording anything —
+if a release re-points the ward between the screen loading and the button being
+pressed, the submission is refused with `EDGE_CHANGED_RELOAD` rather than
+applied to a mapping nobody looked at. An approval is stored as
+`Ward.stateConstituencyEdgeApprovedForId`, and the importer clears it whenever
+it moves the edge, so an approval can never follow a ward to a constituency
+nobody approved.
+
+**A review timestamp is not permission.** A rejection is a decision too and
+stamps `stateConstituencyEdgeReviewedAt` like an approval does, so
+`isWardConstituencyEdgeOperational` keys on the approved constituency id and
+nothing may read the timestamp as authority:
+
+| State | Operational |
+|---|---|
+| Sourced edge | Yes |
+| Inferred, approved for this exact edge | Yes |
+| Inferred, approved for a different edge | No |
+| Inferred, rejected | No |
+| Inferred, undecided | No |
+
+**The database refuses a projection that names an edge the ward does not have.**
+`Ward_edge_approval_matches_current_edge_check` requires a non-null approval to
+sit on an inferred edge, with a non-null current constituency, equal to it. The
+inferred and non-null tests are spelled out rather than relying on
+`approvedForId IS NULL OR approvedForId = stateConstituencyId`, because a CHECK
+admits a row whose predicate evaluates to NULL — the short form would accept
+exactly the state it exists to forbid. That constraint is what makes the
+null-checking scope filter provably equivalent to the row rule instead of
+equivalent by argument: **the application transaction tries to preserve the
+invariant; the database makes violating it impossible.**
+
+Decisions are taken against a `SELECT … FOR UPDATE` on the ward, so an import
+re-pointing the edge mid-review is seen before the write rather than after it,
+and two reviewers deciding at once serialize on the same row. Decision time is
+assigned under that lock and forced past the previous decision, so "newest" is a
+fact rather than a race between two timestamps.
+
+**A decision governs only its own review subject** — ward, constituency,
+reference release and inference basis. A ward moved away and later moved back is
+offered for review again rather than inheriting the earlier verdict, and an
+approval whose projection has since been cleared reads as `PENDING`, not
+`APPROVED`, so a blocked ward can never hide from the queue. The earlier
+decision stays visible as history.
+
+Rejection records that a human looked and said no. It never writes
+`Ward.stateConstituencyId`: correcting a wrong mapping is a reference-data
+change, and the importer owns that column. Every decision writes an `AuditLog`
+entry carrying the edge, the reason, the inference basis and the member and
+coordinator counts at the time. Coordinators are reported for decision impact
+and are never modified — coordinator territory provenance is separate work.
+
 ## Backfill
 
 `npm run backfill:member-ancestry -- --dry-run`

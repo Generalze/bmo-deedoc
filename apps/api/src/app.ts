@@ -8,6 +8,7 @@ import agentRoutes from "./routes/agent";
 import authRoutes from "./routes/auth";
 import candidateRoutes from "./routes/candidate";
 import dashboardRoutes from "./routes/dashboard";
+import edgeGovernanceRoutes from "./routes/edge-governance";
 import electionDayRoutes from "./routes/election-day";
 import evidenceRoutes from "./routes/evidence";
 import mediaRoutes from "./routes/media";
@@ -91,6 +92,7 @@ export function createApp() {
   app.use("/evidence", evidenceRoutes);
   app.use("/pre-election", preElectionRoutes);
   app.use("/dashboard", dashboardRoutes);
+  app.use("/governance", edgeGovernanceRoutes);
   // Legacy/transitional identity routes remain until their content dependencies move to target domains.
   app.use("/admin", adminRoutes);
   app.use("/agent", agentRoutes);

@@ -167,6 +167,11 @@ surfaced, and they gate real-user exposure independently of infrastructure work.
 - ~~Repair or backfill existing compatible records~~ — `npm run backfill:member-ancestry` (dry-run / apply, idempotent)
 - ~~Dashboards must read real ancestry, not nullable denormalised columns~~ — one shared authority (`apps/api/src/lib/member-territory-scope.ts`) scopes members for both the command dashboard and the strength engine, and constituency-level counts exclude unreviewed inferred edges
 
+**A Super Admin review workflow now exists** (`/governance/inferred-edges`,
+one edge at a time, no bulk decision) so a confirmed mapping can become
+operational. **No edge has been reviewed**; the 55 remain blocked until someone
+decides them, and rejecting one leaves it blocked rather than correcting it.
+
 **This does not make member ancestry operationally complete.** 55 of the 236
 ward → State Constituency edges in the Ogun identity release are inferred and
 still unreviewed (recorded as 56 rows; one ward is listed twice, the earlier

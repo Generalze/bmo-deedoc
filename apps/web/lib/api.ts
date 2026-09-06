@@ -5,6 +5,8 @@ import type {
   AdminMapSummary,
   AgentActivitySummary,
   AuthUserProfile,
+  InferredEdgeReviewItem,
+  InferredEdgeReviewSummary,
   AuditLogItem,
   BroadcastMessageItem,
   BroadcastAudiencePreview,
@@ -708,6 +710,52 @@ export async function fetchOgunOrganizationTree(token: string): Promise<OgunOrga
   });
   const payload = await readJson<{ tree: OgunOrganizationTree }>(response);
   return payload.tree;
+}
+
+/**
+ * Inferred-edge governance. Super Admin only; the server enforces that, and
+ * these helpers exist so the screen can show a reviewer what they are deciding.
+ */
+export async function fetchInferredEdges(
+  token: string,
+  state?: "ALL" | "PENDING" | "APPROVED" | "REJECTED",
+): Promise<{ edges: InferredEdgeReviewItem[]; summary: InferredEdgeReviewSummary }> {
+  const query = state && state !== "ALL" ? `?state=${state}` : "";
+  const response = await fetch(`${API_BASE_URL}/governance/inferred-edges${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ edges: InferredEdgeReviewItem[]; summary: InferredEdgeReviewSummary }>(response);
+}
+
+export async function fetchInferredEdge(
+  token: string,
+  wardId: string,
+): Promise<{ edge: InferredEdgeReviewItem; history: Array<Record<string, unknown>> }> {
+  const response = await fetch(`${API_BASE_URL}/governance/inferred-edges/${wardId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ edge: InferredEdgeReviewItem; history: Array<Record<string, unknown>> }>(response);
+}
+
+/**
+ * The decision carries the constituency the reviewer was shown. If the ward has
+ * moved since, the server refuses with 409 rather than applying the judgement to
+ * a mapping nobody looked at.
+ */
+export async function decideInferredEdge(
+  token: string,
+  wardId: string,
+  outcome: "approve" | "reject",
+  input: { stateConstituencyId: string; reason: string },
+): Promise<{ message: string; edge: InferredEdgeReviewItem }> {
+  const response = await fetch(`${API_BASE_URL}/governance/inferred-edges/${wardId}/${outcome}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return readJson<{ message: string; edge: InferredEdgeReviewItem }>(response);
 }
 
 export async function logoutCurrentUser(token: string): Promise<{ message: string }> {

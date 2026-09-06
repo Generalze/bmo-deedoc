@@ -727,7 +727,7 @@ export async function applyIdentityRelease(
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
     const importedAt = new Date();
-    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0, inferredWardEdges: 0 };
+    const counts = { lgas: 0, stateConstituencies: 0, wards: 0, pollingUnits: 0, lgaMemberships: 0, inferredWardEdges: 0, clearedEdgeApprovals: 0 };
 
     for (const item of payload.territories.filter((territory) => territory.kind === "LGA")) {
       await transactionAny.lGA.upsert({
@@ -802,12 +802,40 @@ export async function applyIdentityRelease(
     for (const item of payload.territories.filter((territory) => territory.kind === "WARD")) {
       /**
        * The import owns whether an edge was inferred; it never owns whether a
-       * human has since reviewed one. The review columns are deliberately
-       * absent from both branches so re-importing a release cannot revoke a
-       * completed review, and a ward that has dropped off the inferred list is
-       * cleared rather than left flagged.
+       * human has since reviewed one. The decision record and the review
+       * columns are absent from both branches, so re-importing a release
+       * cannot revoke a completed review, and a ward that has dropped off the
+       * inferred list is cleared rather than left flagged.
        */
       const inferenceBasis = payload.inferredWardEdges.get(item.canonicalId) ?? null;
+
+      /**
+       * An approval is about one edge, so it cannot survive that edge changing.
+       *
+       * One conditional statement rather than read-then-decide-then-write: the
+       * previous shape asked whether an approval existed, then wrote much
+       * later, and an approval committed in between was preserved through a
+       * re-point — leaving the projection naming a constituency the ward no
+       * longer had. This clears and locks in the same statement, so a
+       * governance decision either lands before it and is cleared, or waits
+       * and then sees the new edge.
+       *
+       * `IS DISTINCT FROM` because a NULL edge on either side is a change, and
+       * ordinary inequality would answer NULL and clear nothing. An edge the
+       * release now calls sourced also drops the approval: an inferred-edge
+       * projection has no meaning on an edge nobody had to infer.
+       */
+      const clearedEdgeApprovals = await transactionAny.$executeRaw`
+        UPDATE "Ward"
+           SET "stateConstituencyEdgeApprovedForId" = NULL
+         WHERE "id" = ${item.canonicalId}
+           AND "stateConstituencyEdgeApprovedForId" IS NOT NULL
+           AND (
+             "stateConstituencyId" IS DISTINCT FROM ${item.stateConstituencyId}
+             OR ${inferenceBasis === null}
+           )`;
+      counts.clearedEdgeApprovals += Number(clearedEdgeApprovals);
+
       await transactionAny.ward.upsert({
         where: { id: item.canonicalId },
         update: {
