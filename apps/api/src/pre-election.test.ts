@@ -1841,6 +1841,118 @@ export async function runPreElectionTests() {
       });
     }
 
+    /* ---- Rollback / roll-forward custody ------------------------------------
+     * The database no longer refuses an incomplete document row: migration
+     * 20260906180000 dropped those CHECK constraints so the previous
+     * application image stays a valid rollback target. That image writes the
+     * historical shape, so rows in that shape can be created *after* the
+     * migration, by an older image, during a rollback window.
+     *
+     * Nothing incomplete may be mistaken for a stored identity document. The
+     * read path judges custody completeness rather than a provider label,
+     * because the set of labels is open — an image nobody anticipated could
+     * write a third one.
+     */
+    {
+      const rollbackMember = await registerMember("930", null, "rollback-custody");
+      const rollbackVerification = await prisma.voterVerification.findFirstOrThrow({
+        where: { memberUserId: rollbackMember.id },
+      });
+      const rollbackDocument = await prisma.voterVerificationDocument.findFirstOrThrow({
+        where: { verificationId: rollbackVerification.id },
+      });
+
+      const accessAttempt = () =>
+        apiRequest(
+          `/pre-election/verifications/${rollbackVerification.id}/documents/${rollbackDocument.id}/access`,
+          { token: validatorToken },
+        );
+
+      // Baseline: complete custody is servable, so a later refusal is caused by
+      // the incompleteness rather than by something else about this fixture.
+      const servable = await accessAttempt();
+      assert.equal(servable.status, 200, `complete custody must be servable: ${JSON.stringify(servable.payload)}`);
+
+      const incompleteShapes: Array<{ label: string; provider: string }> = [
+        // A: exactly what a rolled-back previous image writes.
+        { label: "A historical stub provider", provider: "PRIVATE_OBJECT_STORAGE_STUB" },
+        // B: what migration 20260906120000 relabelled those rows to.
+        { label: "B normalized legacy provider", provider: "UNSTORED_LEGACY_STUB" },
+        // C: an image nobody anticipated. The point of not testing a literal.
+        { label: "C unexpected provider", provider: "SOME_FUTURE_UNKNOWN_PROVIDER" },
+        // D: a provider that looks like real storage, with custody missing.
+        { label: "D plausible provider, incomplete custody", provider: "s3-compatible" },
+      ];
+
+      for (const shape of incompleteShapes) {
+        await prisma.voterVerificationDocument.update({
+          where: { id: rollbackDocument.id },
+          data: { storageProvider: shape.provider, storageBucket: null, serverReceivedAt: null },
+        });
+
+        const refused = await accessAttempt();
+        assert.equal(
+          refused.status,
+          409,
+          `${shape.label}: incomplete custody must be refused, got ${refused.status} ${JSON.stringify(refused.payload)}`,
+        );
+        assert.equal((refused.payload as { code: string }).code, "DOCUMENT_WAS_NEVER_STORED", shape.label);
+        assert.equal(
+          Object.prototype.hasOwnProperty.call(refused.payload, "url"),
+          false,
+          `${shape.label}: no signed URL may be issued for incomplete custody`,
+        );
+      }
+
+      // Partial completeness is still incompleteness: a bucket without a
+      // receipt time, and a receipt time without a bucket.
+      await prisma.voterVerificationDocument.update({
+        where: { id: rollbackDocument.id },
+        data: { storageProvider: "s3-compatible", storageBucket: "some-bucket", serverReceivedAt: null },
+      });
+      assert.equal((await accessAttempt()).status, 409, "a bucket without a receipt time is not custody");
+
+      await prisma.voterVerificationDocument.update({
+        where: { id: rollbackDocument.id },
+        data: { storageBucket: null, serverReceivedAt: new Date() },
+      });
+      assert.equal((await accessAttempt()).status, 409, "a receipt time without a bucket is not custody");
+
+      // An object still sitting in the pending namespace is owned by no
+      // committed row and may be swept at any moment.
+      await prisma.voterVerificationDocument.update({
+        where: { id: rollbackDocument.id },
+        data: {
+          storageProvider: "memory",
+          storageBucket: "evidence-test-bucket",
+          serverReceivedAt: new Date(),
+          originalStorageKey: "voter-verification/pending/never-promoted.pdf",
+        },
+      });
+      assert.equal(
+        (await accessAttempt()).status,
+        409,
+        "a document that never left pending custody must not be servable",
+      );
+
+      // Every refusal is audited, so an operator can see why a validator was
+      // shown nothing.
+      const refusals = await prisma.auditLog.count({
+        where: { action: "VERIFICATION_DOCUMENT_ACCESS_REFUSED", targetId: rollbackDocument.id },
+      });
+      assert.ok(refusals >= incompleteShapes.length, `expected an audit per refusal, saw ${refusals}`);
+
+      await prisma.voterVerificationDocument.update({
+        where: { id: rollbackDocument.id },
+        data: {
+          storageProvider: "memory",
+          storageBucket: "evidence-test-bucket",
+          serverReceivedAt: new Date(),
+          originalStorageKey: rollbackDocument.originalStorageKey,
+        },
+      });
+    }
+
     console.log("pre_election_tests=passed");
   } finally {
     await new Promise<void>((resolve, reject) => {

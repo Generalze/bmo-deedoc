@@ -248,6 +248,66 @@ if (migrationText) {
   }
 }
 
+/* ---- Reads judge custody, not labels -------------------------------------
+ * The database no longer refuses an incomplete row, so a previous image can
+ * create one after the migration. A read path that tests for known legacy
+ * provider strings would serve the next unanticipated one.
+ */
+if (!authority.includes("export function isServableCustody")) {
+  failures.push(`${authorityRelative}: the custody-completeness predicate is missing.`);
+} else {
+  const servableBody = functionBody(authority, "export function isServableCustody");
+  if (!servableBody) {
+    failures.push(`${authorityRelative}: isServableCustody could not be read.`);
+  } else {
+    for (const [needle, why] of [
+      ["document.storageBucket", "a servable document must have a recorded bucket"],
+      ["document.serverReceivedAt", "a servable document must have a recorded server receipt time"],
+      ["isPendingObjectKey", "a document still in pending custody must not be servable"],
+    ]) {
+      if (!servableBody.includes(needle)) {
+        failures.push(`${authorityRelative}: isServableCustody no longer checks that ${why}.`);
+      }
+    }
+    if (/storageProvider\s*===/.test(servableBody)) {
+      failures.push(
+        `${authorityRelative}: isServableCustody compares storageProvider against a literal. The set of historical labels is open — an image nobody anticipated writes a new one — so servability must be decided by custody completeness alone.`,
+      );
+    }
+  }
+}
+
+/* ---- Legacy normalization stays bounded ----------------------------------
+ * It may relabel exactly the shape migration 20260906120000 already
+ * established, and must never reinterpret an unfamiliar provider.
+ */
+const normalizerRelative = "scripts/normalize-legacy-voter-documents.mjs";
+let normalizer = "";
+try {
+  normalizer = readFileSync(path.join(repoRoot, normalizerRelative), "utf8");
+} catch {
+  failures.push(`${normalizerRelative} is missing.`);
+}
+if (normalizer) {
+  const targetMatch = normalizer.match(/const target = \{[\s\S]*?\};/);
+  if (!targetMatch) {
+    failures.push(`${normalizerRelative}: the relabel target could not be read.`);
+  } else {
+    const target = targetMatch[0];
+    for (const [needle, why] of [
+      ["storageProvider: HISTORICAL_PROVIDER", "it must relabel only the historical provider"],
+      ["storageBucket: null", "it must relabel only rows with no recorded bucket"],
+      ["serverReceivedAt: null", "it must relabel only rows with no recorded receipt time"],
+    ]) {
+      if (!target.includes(needle)) {
+        failures.push(
+          `${normalizerRelative}: the relabel target has widened — ${why}. Reinterpreting an unfamiliar provider assigns a meaning to an identity-document record that nobody established.`,
+        );
+      }
+    }
+  }
+}
+
 /* ---- Report --------------------------------------------------------------- */
 
 if (failures.length > 0) {

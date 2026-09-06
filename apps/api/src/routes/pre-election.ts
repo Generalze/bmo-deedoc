@@ -30,6 +30,8 @@ import { getPrivateObjectStorage } from "@pics-nigeria/object-storage";
 import { createAuditLog } from "../lib/audit";
 import {
   VoterDocumentRejected,
+  describeIncompleteCustody,
+  isServableCustody,
   storeVoterDocument,
   withVoterDocumentCustody,
   voterDocumentSubmissionSchema,
@@ -1088,7 +1090,17 @@ router.get(
      * uploaded. Issuing a URL for it would produce a link to nothing while
      * reading as a successful, audited access.
      */
-    if (document.storageProvider === "UNSTORED_LEGACY_STUB" || !document.storageBucket) {
+    /**
+     * Custody completeness, not a provider literal.
+     *
+     * The database no longer refuses an incomplete row — those constraints were
+     * dropped so the previous image stays a valid rollback target — so rows in
+     * the historical shape can be created *after* the migration, by an older
+     * image during a rollback window. Testing for one known literal would let
+     * the next unanticipated one through.
+     */
+    if (!isServableCustody(document)) {
+      const reason = describeIncompleteCustody(document);
       await createAuditLog(prisma, {
         actorUserId: request.authUser!.id,
         action: "VERIFICATION_DOCUMENT_ACCESS_REFUSED",
@@ -1096,12 +1108,13 @@ router.get(
         targetId: document.id,
         metadata: {
           verificationId: document.verification.id,
-          reason: "DOCUMENT_WAS_NEVER_STORED",
+          reason,
+          storageProvider: document.storageProvider,
         },
       });
       return response.status(409).json({
         message:
-          "This document was recorded before private storage existed and its bytes were never stored. Ask the member to resubmit.",
+          "No document is stored against this record. It was either created before private storage existed, or written by an application version that did not take custody of the bytes. Ask the member to resubmit.",
         code: "DOCUMENT_WAS_NEVER_STORED",
       });
     }
