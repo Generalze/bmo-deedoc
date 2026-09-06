@@ -269,6 +269,82 @@ for (const dockerfile of ["deploy/docker/api.Dockerfile", "deploy/docker/web.Doc
 const migrationRoot = path.join(repoRoot, "packages", "database", "prisma", "ogun-migrations");
 const migrationCount = readdirSync(migrationRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).length;
 
+/* ---- Object storage policy matches the custody model ---------------------
+ * The application may delete an uncommitted registration object and nothing
+ * else. If that grant widens, a cleanup becomes evidence destruction; if it
+ * disappears, a failed registration strands an identity document with no owner.
+ */
+const bucketPolicyText = contents.get("deploy/storage/bucket-policy.json");
+if (bucketPolicyText) {
+  let policy = null;
+  try {
+    policy = JSON.parse(bucketPolicyText);
+  } catch {
+    failures.push("deploy/storage/bucket-policy.json is not valid JSON.");
+  }
+
+  if (policy) {
+    const statements = policy.Statement || [];
+    const actionsOf = (statement) => [statement.Action || []].flat();
+    const resourcesOf = (statement) => [statement.Resource || []].flat();
+
+    const pendingGrant = statements.find(
+      (statement) =>
+        statement.Effect === "Allow" &&
+        actionsOf(statement).includes("s3:DeleteObject") &&
+        resourcesOf(statement).some((resource) => String(resource).includes("/voter-verification/pending/")),
+    );
+    if (!pendingGrant) {
+      failures.push(
+        "deploy/storage/bucket-policy.json grants the application no delete on voter-verification/pending/*. A failed registration would strand an identity document with no database owner.",
+      );
+    }
+
+    const broadGrant = statements.find(
+      (statement) =>
+        statement.Effect === "Allow" &&
+        actionsOf(statement).includes("s3:DeleteObject") &&
+        resourcesOf(statement).some((resource) => !String(resource).includes("/voter-verification/pending/")),
+    );
+    if (broadGrant) {
+      failures.push(
+        `deploy/storage/bucket-policy.json allows deletion outside the pending namespace (${broadGrant.Sid}). Committed evidence must not be deletable by the application.`,
+      );
+    }
+
+    const committedDenial = statements.find(
+      (statement) =>
+        statement.Effect === "Deny" &&
+        actionsOf(statement).includes("s3:DeleteObject") &&
+        String(statement.NotResource || "").includes("/voter-verification/pending/"),
+    );
+    if (!committedDenial) {
+      failures.push(
+        "deploy/storage/bucket-policy.json does not deny the application deletion outside the pending namespace. The narrow grant must be paired with an explicit denial everywhere else.",
+      );
+    }
+
+    if (!statements.some((statement) => statement.Sid === "DenyPublicRead")) {
+      failures.push("deploy/storage/bucket-policy.json no longer denies public read.");
+    }
+    if (!statements.some((statement) => statement.Sid === "DenyUnencryptedTransport")) {
+      failures.push("deploy/storage/bucket-policy.json no longer requires TLS.");
+    }
+  }
+}
+
+const storageReadme = contents.get("deploy/storage/README.md");
+if (storageReadme) {
+  if (!storageReadme.includes("voter-verification/pending/")) {
+    failures.push("deploy/storage/README.md no longer documents the pending namespace.");
+  }
+  if (/never needs to delete an object/.test(storageReadme)) {
+    failures.push(
+      "deploy/storage/README.md still claims the application never deletes. It deletes exactly one thing: an uncommitted registration object.",
+    );
+  }
+}
+
 if (failures.length > 0) {
   for (const failure of failures) {
     console.error(`FAIL ${failure}`);

@@ -23,7 +23,7 @@ other than `s3`.
 | Object Lock | Enabled in governance mode, where the provider supports it | Evidence that can be silently replaced is evidence that cannot be relied on. |
 | Encryption at rest | Enabled (SSE-S3 or SSE-KMS) | |
 | TLS | Required | `DenyUnencryptedTransport` in the policy enforces it; the endpoint must also be `https://`. |
-| Lifecycle expiry | **None** | Evidence has no expiry date, and a lifecycle rule that quietly deletes it destroys the record without an audit trail. |
+| Lifecycle expiry | **None on committed objects.** One rule, on `voter-verification/pending/` only | Evidence has no expiry date, and a lifecycle rule that quietly deletes it destroys the record without an audit trail. The pending namespace is the sole exception, and it holds only bytes no database row owns yet. |
 
 ## Applying the policy
 
@@ -32,9 +32,57 @@ other than `s3`.
 - `BUCKET_NAME` — the bucket, e.g. `ogun-staging-private`
 - `APPLICATION_PRINCIPAL_ARN` — the identity the API and worker use
 - `EVIDENCE_CUSTODIAN_PRINCIPAL_ARN` — a separate, rarely used identity that may
-  delete. It must not be the application principal: the application never needs
-  to delete an object, and separating the two means an application credential
-  leak cannot destroy evidence.
+  delete a committed object. It must not be the application principal, so an
+  application credential leak cannot destroy evidence.
+
+## Two custody states
+
+A document has to be written to storage before the database row that owns it
+exists, because a row must never name an object that is not there. That leaves a
+window in which bytes exist with no owner, and a transaction that fails inside
+that window would strand an identity document with no record and no lifecycle.
+
+So the bucket holds two kinds of object, and the policy treats them differently:
+
+| Namespace | State | Application may delete? |
+|---|---|---|
+| `voter-verification/pending/*` | Uncommitted. No database row owns these yet. | **Yes**, and only here. |
+| `voter-verification/<year>/<month>/*` | Committed. A row names it. | No. |
+| `evidence/*` | Committed evidence. | No. |
+
+The application is granted `DeleteObject` on the pending prefix and explicitly
+denied it everywhere else, by `NotResource`. The narrowness is what makes this
+safe: the alternative — letting the application delete anywhere so it can tidy
+up after itself — would put permanent election evidence within reach of any bug
+or leaked credential in the request path.
+
+The same boundary is enforced in code. `discardPendingObject` refuses any key
+outside the pending namespace, and `promotePendingObject` refuses to move a
+document *into* it. A misconfigured policy is therefore not the only thing
+standing between a cleanup and evidence destruction.
+
+### Pending lifecycle rule
+
+A pending object is normally removed within the same request, either by
+promotion or by cleanup. A lifecycle rule is the backstop for the case where the
+process dies between the two.
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "expire-uncommitted-registration-objects",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "voter-verification/pending/" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}
+```
+
+It must carry that prefix. A lifecycle rule without a filter, or with a broader
+one, would put an expiry date on permanent election evidence — which is the
+thing this bucket exists to prevent.
 
 ```bash
 sed -e "s|BUCKET_NAME|$STORAGE_BUCKET|g" \
