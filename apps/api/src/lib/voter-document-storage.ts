@@ -6,6 +6,7 @@ import {
   PRIVATE_STORAGE_PREFIXES,
   discardPendingObject,
   getPrivateObjectStorage,
+  isPendingObjectKey,
   promotePendingObject,
 } from "@pics-nigeria/object-storage";
 
@@ -312,4 +313,51 @@ async function cleanUpAfterFailure(stored: StoredVoterDocument, actorUserId: str
   console.error(
     `voter_document_orphan documentId=${stored.documentId} pendingStorageKey=${stored.pendingStorageKey} reason=${cleanup.error || "unknown"}`,
   );
+}
+
+/**
+ * Whether a document record describes custody the server actually took.
+ *
+ * The database no longer refuses an incomplete row: migration 20260906180000
+ * dropped those CHECK constraints so a previous application image stays a valid
+ * rollback target, and that image writes the historical shape — a stub
+ * provider, no bucket, no receipt time. If a rollback happens and is later
+ * rolled forward, rows in that shape will exist, created *after* the migration
+ * ran.
+ *
+ * So this cannot ask "is the provider one of the legacy literals". A literal is
+ * a label, and the set of labels is open: an image nobody anticipated could
+ * write a third one. It asks what custody means instead — the server recorded
+ * where the object is and when it took it, and the key is in the committed
+ * namespace rather than the pending one.
+ *
+ * Anything short of that is unavailable, and no signed URL is issued for it.
+ * Failing closed here is what keeps a relaxed database from becoming a relaxed
+ * product.
+ */
+export function isServableCustody(document: {
+  storageProvider: string;
+  storageBucket: string | null;
+  serverReceivedAt: Date | null;
+  originalStorageKey: string;
+}): boolean {
+  if (!document.storageBucket) return false;
+  if (!document.serverReceivedAt) return false;
+  // Pending objects are owned by no committed row and may be swept at any time.
+  if (isPendingObjectKey(document.originalStorageKey)) return false;
+  if (!document.originalStorageKey.startsWith(`${PRIVATE_STORAGE_PREFIXES.voterVerification}/`)) return false;
+  return true;
+}
+
+/** Why a record is not servable, for the audit trail. */
+export function describeIncompleteCustody(document: {
+  storageProvider: string;
+  storageBucket: string | null;
+  serverReceivedAt: Date | null;
+  originalStorageKey: string;
+}): string {
+  if (!document.storageBucket) return "NO_STORAGE_BUCKET_RECORDED";
+  if (!document.serverReceivedAt) return "NO_SERVER_RECEIPT_TIME_RECORDED";
+  if (isPendingObjectKey(document.originalStorageKey)) return "OBJECT_NEVER_LEFT_PENDING_CUSTODY";
+  return "STORAGE_KEY_OUTSIDE_COMMITTED_NAMESPACE";
 }

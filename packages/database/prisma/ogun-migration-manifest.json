@@ -77,6 +77,10 @@
     {
       "name": "20260906120000_voter_document_private_storage",
       "sha256": "4898f34778773c3d582721e4107dd2a6aa14905af3d40cf059f46036bafa79d6"
+    },
+    {
+      "name": "20260906180000_voter_document_rollback_compatibility",
+      "sha256": "e17572cf9b4176975445af311388ff8eb131e3696915d540ab00cb4b51510039"
     }
   ]
 }

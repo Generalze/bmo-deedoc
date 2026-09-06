@@ -142,6 +142,86 @@ environment:
 Then set `TURN_URL=turns:ops.example.org:5349` and open 5349/tcp and 5349/udp.
 With TLS disabled, leave those ports closed.
 
+## 4b. Voter-document migration preflight
+
+`npm run deploy:migrate` runs this before Prisma, and a failure stops the
+deployment.
+
+Migration `20260906120000_voter_document_private_storage` normalizes historical
+rows by an exact string — every `VoterVerificationDocument` whose
+`storageProvider` is `PRIVATE_OBJECT_STORAGE_STUB` becomes
+`UNSTORED_LEGACY_STUB` — and then adds constraints assuming nothing else was
+left behind. That is true of the code which wrote those rows; it is not enforced
+by the schema, so it is not true by construction.
+
+The preflight proves it against the actual target while the schema is still the
+pre-migration one. It reads provider values and counts, never document content.
+
+```bash
+npm run preflight:voter-documents
+```
+
+It does **not** repair anything. An unexpected provider means the database holds
+history this migration was not written for, and folding it into "legacy stub"
+would assign a meaning to someone's identity-document record that nobody
+established. Decide what those rows are before migrating.
+
+## 4c. Voter-document rollback window
+
+`20260906180000_voter_document_rollback_compatibility` drops the two CHECK
+constraints the previous migration added.
+
+This is the expand half of expand/contract, not a retreat. The previous
+application image remains a valid rollback target for a while, and it writes the
+historical document shape — stub provider, no bucket, no receipt time — which
+those constraints reject. A rollback would fail at INSERT time.
+
+`ADD CONSTRAINT ... NOT VALID` does not solve this. It skips validation of rows
+that already exist and still enforces the constraint on every subsequent write,
+so the old image would still fail. The problem is the old writer, not the old
+rows.
+
+The guarantee moves rather than weakens. The application remains the sole
+authority for document custody: it generates the storage key, measures the size,
+computes the hash, records the bucket and the receipt time, and refuses to serve
+any document whose custody is incomplete — judged by completeness, never by a
+provider label, because the set of labels is open. A database that tolerates the
+old shape is not a database that produces it.
+
+**Deployment order**
+
+```text
+preflight target data          npm run preflight:voter-documents
+        ↓  must hold only the known historical shape
+backup                         §11
+        ↓
+migrate deploy                 npm run deploy:migrate   (#19 then #20)
+        ↓
+start new image
+        ↓
+smoke test                     npm run smoke:deployment
+        ↓
+rollback remains possible
+```
+
+If a rollback happens and is later rolled forward, the old image will have
+created rows in the historical shape. They are already refused at read time.
+Relabel them so both populations read the same way:
+
+```bash
+npm run normalize:legacy-voter-documents            # report only
+npm run normalize:legacy-voter-documents -- --apply
+```
+
+It recovers nothing — the old image never uploaded any bytes — and it will not
+touch a provider it does not recognise. Idempotent and content-blind.
+
+**Later: the contract migration.** Once staging and UAT have proved the new
+image and the previous one is no longer an allowed rollback target, a further
+migration may reintroduce strict CHECK constraints, at that point using
+`ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT`. Do not add it
+before the rollback window closes.
+
 ## 5. Database migration
 
 Migrations are run by a dedicated one-shot `migrate` service. Every long-running service declares `depends_on: migrate: service_completed_successfully`, so **containers cannot race the migration stream** — a restarting API replica will never apply migrations concurrently with another.
