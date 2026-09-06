@@ -28,6 +28,18 @@ import {
 } from "../../../lib/api";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { VoiceCallPanel } from "../../../components/voice-call-panel";
+import {
+  DataTable,
+  DetailList,
+  EmptyRow,
+  Field,
+  Kpi,
+  KpiRow,
+  PageHead,
+  Panel,
+  StateView,
+  formatCount,
+} from "../../../components/ui";
 import { readSession } from "../../../lib/session";
 
 
@@ -277,269 +289,384 @@ export default function ElectionSituationRoomPage() {
       setBusy(false);
     }
   }
-
   if (loading) {
     return (
-      <main className="shell">
-        <section className="panel hero">
-          <p className="eyebrow">Election Day</p>
-          <h1>Loading Situation Room...</h1>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Election Day Situation Room" />
+        <StateView kind="loading" title="Loading the Situation Room…" />
       </main>
     );
   }
 
   if (!user || !status) {
     return (
-      <main className="shell">
-        <section className="panel card">
-          <h1>Unable to load Situation Room</h1>
-          <FeedbackBanner tone={feedback.tone} message={feedback.message || "Authentication is required."} />
-          <Link href="/">Return home</Link>
-        </section>
+      <main className="console-shell">
+        <PageHead title="Election Day Situation Room" />
+        <StateView
+          kind="error"
+          title="Unable to load the Situation Room"
+          detail={feedback.message || "Authentication is required."}
+          action={
+            <Link className="btn btn-primary" href="/">
+              Return home
+            </Link>
+          }
+        />
       </main>
     );
   }
 
   return (
-    <main className="shell situation-room">
-      <section className="panel hero situation-hero">
-        <p className="eyebrow">Election Day Situation Room</p>
-        <h1>Live command board for Ogun operations</h1>
-        <p>
-          Realtime status: {status.realtime.runtimeStatus}. REST fallback is {status.realtime.restFallbackAvailable ? "available" : "unavailable"}.
-        </p>
-        <div className="action-row" style={{ marginTop: 12 }}>
-          <label className="field compact-field">
-            <span>Operating date</span>
-            <input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
-          </label>
-          <button className="button" type="button" disabled={busy} onClick={() => void loadPage(readSession() || "", reportDate)}>
-            Refresh
-          </button>
-          <button className="button secondary" type="button" disabled={busy} onClick={() => void handleReconcileAlerts()}>
-            Reconcile Alerts
-          </button>
-          <Link className="button secondary" href="/agent/election-report">Submit Report</Link>
-        </div>
-      </section>
-
-      <FeedbackBanner tone={feedback.tone} message={feedback.message} />
-
-      <section className="grid stats situation-stats">
-        <article className="panel card">
-          <h2>Expected PUs</h2>
-          <div className="value">{status.totals.expectedPollingUnits}</div>
-        </article>
-        <article className="panel card">
-          <h2>Checked In</h2>
-          <div className="value">{status.totals.checkedInPollingUnits}</div>
-        </article>
-        <article className="panel card">
-          <h2>Reports</h2>
-          <div className="value">{pct(status.totals.reportingPercentage)}</div>
-        </article>
-        <article className="panel card">
-          <h2>Open Alerts</h2>
-          <div className="value">{activeAlerts.length}</div>
-        </article>
-        <article className="panel card">
-          <h2>Critical Incidents</h2>
-          <div className="value">{status.totals.criticalIncidents}</div>
-        </article>
-        <article className="panel card">
-          <h2>Stale Tracking</h2>
-          <div className="value">{staleUnits.length}</div>
-        </article>
-      </section>
-
-      <section className="situation-grid">
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Polling Unit operational status</h2>
-              <p className="muted">Hierarchical status is scoped by backend authorization. Geofence validation remains gated by authoritative PU geodata.</p>
-            </div>
-            <span className="status-pill">{status.pollingUnits.length} visible</span>
-          </div>
-          <div className="operation-board">
-            {status.pollingUnits.slice(0, 80).map((unit) => (
-              <button
-                key={unit.pollingUnitId}
-                type="button"
-                className={`operation-unit ${selectedPollingUnit?.pollingUnitId === unit.pollingUnitId ? "selected" : ""}`}
-                onClick={() => setSelectedPollingUnit(unit)}
-              >
-                <strong>{unit.pollingUnitName || unit.pollingUnitId}</strong>
-                <span className={`status-pill ${statusTone(unit.operationalStatus)}`}>{unit.operationalStatus}</span>
-                <span>{unit.coordinatorName || "No coordinator"}</span>
-                <span className="muted">Report: {unit.reportStatus} | Incidents: {unit.openIncidentCount}</span>
-              </button>
-            ))}
-            {status.pollingUnits.length === 0 ? <p className="muted">No Polling Units are visible in this command scope.</p> : null}
-          </div>
-        </section>
-
-        <aside className="panel card">
-          <h2>Quick controls</h2>
-          {selectedPollingUnit ? (
-            <div className="reward-list">
-              <article className="reward-item">
-                <strong>{selectedPollingUnit.pollingUnitName || selectedPollingUnit.pollingUnitId}</strong>
-                <p>{selectedPollingUnit.coordinatorName || "No assigned coordinator"}</p>
-                <p className="muted">
-                  Last seen: {selectedPollingUnit.lastSeenAt ? new Date(selectedPollingUnit.lastSeenAt).toLocaleString() : "No tracking signal"}
-                </p>
-                <p className="muted">Geofence: {selectedPollingUnit.geofence.status}</p>
-                <div className="action-row">
-                  <button className="button secondary" type="button" disabled={busy || !selectedPollingUnit.coordinatorUserId} onClick={() => void openDirectChat(selectedPollingUnit)}>
-                    Message
-                  </button>
-                  <button className="button secondary" type="button" disabled={busy || !selectedPollingUnit.coordinatorUserId} onClick={() => void requestCheckIn(selectedPollingUnit)}>
-                    Request Check-In
-                  </button>
-                  <Link className="button secondary" href="/admin/election-reports">View Reports</Link>
-                </div>
-              </article>
-            </div>
-          ) : (
-            <p className="muted">Select a Polling Unit to message, request check-in, or inspect status.</p>
-          )}
-          <form className="form" style={{ marginTop: 16 }} onSubmit={createTerritoryChat}>
-            <label className="field">
-              <span>Operations chat title</span>
-              <input value={territoryChatTitle} onChange={(event) => setTerritoryChatTitle(event.target.value)} />
+    <main className="console-shell situation-room">
+      <PageHead
+        title="Live command board for Ogun operations"
+        lead={`Realtime status: ${status.realtime.runtimeStatus}. REST fallback is ${
+          status.realtime.restFallbackAvailable ? "available" : "unavailable"
+        }.`}
+        actions={
+          <>
+            <label className="cluster">
+              <span className="kpi-label">Operating date</span>
+              <input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
             </label>
-            <button className="button" type="submit" disabled={busy}>Open Territory Chat</button>
-          </form>
-          <div className="webrtc-card">
-            <strong>Voice foundation</strong>
-            <p className="muted">
-              STUN entries: {webrtc?.iceServers.length || 0}. TURN: {webrtc?.turnConfigured ? "configured" : "not configured"}. Recording: disabled.
-            </p>
-            <p className="muted">Durable call history is blocked pending schema review.</p>
-          </div>
-        </aside>
-      </section>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy}
+              onClick={() => void loadPage(readSession() || "", reportDate)}
+            >
+              Refresh
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={() => void handleReconcileAlerts()}>
+              Reconcile alerts
+            </button>
+            <Link className="btn" href="/agent/election-report">
+              Submit report
+            </Link>
+          </>
+        }
+      />
 
-      <section className="situation-grid secondary-grid">
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Operational alerts</h2>
-              <p className="muted">Lifecycle actions are audited and broadcast through the durable outbox.</p>
-            </div>
-            <span className={`status-pill ${criticalAlerts.length ? "inactive" : "active"}`}>{criticalAlerts.length} critical</span>
-          </div>
-          <div className="reward-list">
-            {alerts.slice(0, 12).map((alert) => (
-              <article key={alert.id} className="reward-item">
-                <div className="section-head compact">
-                  <div>
-                    <strong>{alert.type.replaceAll("_", " ")}</strong>
-                    <p>{alert.message}</p>
-                    <p className="muted">{new Date(alert.detectedAt).toLocaleString()} | {alert.territory.pollingUnitId || "territory"}</p>
-                  </div>
-                  <span className={`status-pill ${statusTone(alert.status)}`}>{alert.status}</span>
-                </div>
-                <div className="action-row">
-                  <button className="button secondary" type="button" disabled={busy || alert.status === "ACKNOWLEDGED"} onClick={() => void handleAlertStatus(alert.id, "ACKNOWLEDGED")}>Acknowledge</button>
-                  <button className="button secondary" type="button" disabled={busy || alert.status === "ESCALATED"} onClick={() => void handleAlertStatus(alert.id, "ESCALATED")}>Escalate</button>
-                  <button className="button" type="button" disabled={busy || alert.status === "RESOLVED"} onClick={() => void handleAlertStatus(alert.id, "RESOLVED")}>Resolve</button>
-                </div>
-              </article>
-            ))}
-            {alerts.length === 0 ? <p className="muted">No durable alerts for this date. Use Reconcile Alerts to create missing check-in, overdue report, and stale tracking alerts.</p> : null}
-          </div>
-        </section>
+      <div className="stack-4">
+        <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
-        <section className="panel card">
-          <div className="section-head">
-            <div>
-              <h2>Election Operations Chat</h2>
-              <p className="muted">Direct, group, and territory conversations are permission-scoped and durable.</p>
-            </div>
-            <span className="status-pill">{conversations.length} chats</span>
-          </div>
-          <div className="chat-layout">
-            <div className="conversation-list">
-              {conversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  className={`conversation-button ${conversation.id === selectedConversationId ? "selected" : ""}`}
-                  onClick={() => setSelectedConversationId(conversation.id)}
-                >
-                  <strong>{conversationTitle(conversation, user.id)}</strong>
-                  <span>{conversation.type} | {conversation.members.length} members</span>
-                  <span>{conversation.unreadCount} unread</span>
-                </button>
-              ))}
-              {conversations.length === 0 ? <p className="muted">No conversations yet. Open a territory chat or select a PU to message.</p> : null}
-            </div>
-            <div className="message-pane">
-              <strong>{selectedConversation ? conversationTitle(selectedConversation, user.id) : "No conversation selected"}</strong>
-              <div className="message-list">
-                {messages.map((message) => (
-                  <article key={message.id} className={`message-bubble ${message.senderUserId === user.id ? "own" : ""}`}>
-                    <strong>{message.senderName}</strong>
-                    <p>{message.body}</p>
-                    <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
-                  </article>
-                ))}
-                {selectedConversation && messages.length === 0 ? <p className="muted">No messages in this conversation yet.</p> : null}
-              </div>
-              <form className="message-form" onSubmit={sendMessage}>
-                <input
-                  value={messageDraft}
-                  onChange={(event) => setMessageDraft(event.target.value)}
-                  placeholder="Send an operational update..."
-                  disabled={!selectedConversationId}
-                />
-                <button className="button" type="submit" disabled={busy || !selectedConversationId || !messageDraft.trim()}>Send</button>
-              </form>
-            </div>
-          </div>
-        </section>
-      </section>
-
-      {callToken ? (
-        <section className="panel card" style={{ marginTop: 24 }}>
-          {/* Callable contacts are the people already in this officer's
-              conversations, which the API has authorized for contact. */}
-          <VoiceCallPanel
-            token={callToken}
-            contacts={conversations
-              .flatMap((conversation) => conversation.members)
-              .filter((member) => member.userId !== user?.id)
-              .filter((member, index, all) => all.findIndex((item) => item.userId === member.userId) === index)
-              .map((member) => ({ userId: member.userId, name: member.name, role: member.role }))}
+        <KpiRow>
+          <Kpi label="Expected PUs" value={formatCount(status.totals.expectedPollingUnits)} />
+          <Kpi
+            label="Checked in"
+            value={formatCount(status.totals.checkedInPollingUnits)}
+            note={`${formatCount(status.totals.expectedPollingUnits - status.totals.checkedInPollingUnits)} outstanding`}
           />
-        </section>
-      ) : null}
+          <Kpi label="Reporting" value={pct(status.totals.reportingPercentage)} />
+          <Kpi
+            label="Open alerts"
+            value={formatCount(activeAlerts.length)}
+            note={`${formatCount(criticalAlerts.length)} critical`}
+            tone={criticalAlerts.length > 0 ? "warn" : activeAlerts.length > 0 ? "accent" : undefined}
+          />
+          <Kpi
+            label="Critical incidents"
+            value={formatCount(status.totals.criticalIncidents)}
+            tone={status.totals.criticalIncidents > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Stale tracking"
+            value={formatCount(staleUnits.length)}
+            note="No recent signal"
+            tone={staleUnits.length > 0 ? "warn" : undefined}
+          />
+        </KpiRow>
 
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <div>
-            <h2>Operational timeline</h2>
-            <p className="muted">Reports, alerts, incidents, messages, field activity, and durable realtime outbox events.</p>
-          </div>
-          <span className="status-pill">{timeline.length} events</span>
-        </div>
-        <div className="timeline-list">
-          {timeline.map((item) => (
-            <article key={`${item.type}-${item.id}`} className="timeline-item">
-              <span className={`timeline-dot ${item.severity === "CRITICAL" ? "critical" : ""}`} />
-              <div>
-                <strong>{item.title}</strong>
-                <p>{item.detail}</p>
-                <p className="muted">{item.type} | {new Date(item.occurredAt).toLocaleString()} | {item.pollingUnitId || "territory"}</p>
+        <div className="workbench">
+          <Panel
+            title="Polling Unit operational status"
+            meta={`${formatCount(status.pollingUnits.length)} visible`}
+          >
+            <div className="stack-3">
+              <p className="muted-text">
+                Hierarchical status is scoped by backend authorisation. Geofence validation remains gated by
+                authoritative Polling Unit geodata.
+              </p>
+              {/* A status board, not a table: an operator scans this spatially. */}
+              <div className="operation-board">
+                {status.pollingUnits.slice(0, 80).map((unit) => (
+                  <button
+                    key={unit.pollingUnitId}
+                    type="button"
+                    className={`operation-unit ${selectedPollingUnit?.pollingUnitId === unit.pollingUnitId ? "selected" : ""}`}
+                    onClick={() => setSelectedPollingUnit(unit)}
+                  >
+                    <strong>{unit.pollingUnitName || unit.pollingUnitId}</strong>
+                    <span className={`status-pill ${statusTone(unit.operationalStatus)}`}>{unit.operationalStatus}</span>
+                    <span>{unit.coordinatorName || "No coordinator"}</span>
+                    <span className="muted">
+                      Report: {unit.reportStatus} | Incidents: {unit.openIncidentCount}
+                    </span>
+                  </button>
+                ))}
               </div>
-            </article>
-          ))}
-          {timeline.length === 0 ? <p className="muted">No timeline events for this date.</p> : null}
+              {status.pollingUnits.length === 0 ? (
+                <StateView kind="empty" title="No Polling Units visible in this command scope" />
+              ) : null}
+            </div>
+          </Panel>
+
+          <div className="stack-4">
+            <Panel title="Quick controls">
+              {selectedPollingUnit ? (
+                <div className="stack-3">
+                  <DetailList
+                    rows={[
+                      {
+                        label: "Polling Unit",
+                        value: <strong>{selectedPollingUnit.pollingUnitName || selectedPollingUnit.pollingUnitId}</strong>,
+                      },
+                      { label: "Coordinator", value: selectedPollingUnit.coordinatorName || "No assigned coordinator" },
+                      {
+                        label: "Last seen",
+                        value: selectedPollingUnit.lastSeenAt
+                          ? new Date(selectedPollingUnit.lastSeenAt).toLocaleString()
+                          : "No tracking signal",
+                      },
+                      { label: "Geofence", value: selectedPollingUnit.geofence.status },
+                    ]}
+                  />
+                  <div className="btn-row">
+                    <button
+                      className="btn btn-sm"
+                      type="button"
+                      disabled={busy || !selectedPollingUnit.coordinatorUserId}
+                      onClick={() => void openDirectChat(selectedPollingUnit)}
+                    >
+                      Message
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      type="button"
+                      disabled={busy || !selectedPollingUnit.coordinatorUserId}
+                      onClick={() => void requestCheckIn(selectedPollingUnit)}
+                    >
+                      Request check-in
+                    </button>
+                    <Link className="btn btn-sm" href="/admin/election-reports">
+                      View reports
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <StateView
+                  kind="empty"
+                  title="No Polling Unit selected"
+                  detail="Select one from the board to message, request a check-in, or inspect its status."
+                />
+              )}
+            </Panel>
+
+            <Panel title="Open a territory chat">
+              <form className="stack-3" onSubmit={createTerritoryChat}>
+                <Field label="Operations chat title">
+                  <input value={territoryChatTitle} onChange={(event) => setTerritoryChatTitle(event.target.value)} />
+                </Field>
+                <div className="btn-row">
+                  <button className="btn btn-primary" type="submit" disabled={busy}>
+                    Open territory chat
+                  </button>
+                </div>
+              </form>
+            </Panel>
+
+            <Panel title="Voice foundation">
+              <DetailList
+                rows={[
+                  { label: "STUN entries", value: formatCount(webrtc?.iceServers.length || 0) },
+                  {
+                    label: "TURN",
+                    value: webrtc?.turnConfigured ? (
+                      <span className="pill pill-executed">configured</span>
+                    ) : (
+                      <span className="pill pill-refused">not configured</span>
+                    ),
+                  },
+                  { label: "Recording", value: "disabled" },
+                  { label: "Call history", value: "Durable history is blocked pending schema review." },
+                ]}
+              />
+            </Panel>
+          </div>
         </div>
-      </section>
+
+        <Panel
+          title="Operational alerts"
+          meta={`${formatCount(criticalAlerts.length)} critical`}
+          flush
+        >
+          <div className="panel-body">
+            <p className="muted-text">Lifecycle actions are audited and broadcast through the durable outbox.</p>
+          </div>
+          <DataTable
+            head={
+              <tr>
+                <th>Alert</th>
+                <th>Where</th>
+                <th>Status</th>
+                <th>Detected</th>
+                <th className="actions">Action</th>
+              </tr>
+            }
+          >
+            {alerts.length === 0 ? (
+              <EmptyRow colSpan={5}>
+                No durable alerts for this date. Use “Reconcile alerts” to create missing check-in, overdue report and
+                stale tracking alerts.
+              </EmptyRow>
+            ) : (
+              alerts.slice(0, 20).map((alert) => (
+                <tr key={alert.id}>
+                  <td>
+                    <strong>{alert.type.replaceAll("_", " ").toLowerCase()}</strong>
+                    <div className="muted-text">{alert.message}</div>
+                  </td>
+                  <td className="muted-text">{alert.territory.pollingUnitId || "territory"}</td>
+                  <td>
+                    <span className={`status-pill ${statusTone(alert.status)}`}>{alert.status}</span>
+                  </td>
+                  <td className="muted-text">{new Date(alert.detectedAt).toLocaleString()}</td>
+                  <td className="actions">
+                    <span className="btn-row" style={{ justifyContent: "flex-end" }}>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        disabled={busy || alert.status === "ACKNOWLEDGED"}
+                        onClick={() => void handleAlertStatus(alert.id, "ACKNOWLEDGED")}
+                      >
+                        Acknowledge
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        disabled={busy || alert.status === "ESCALATED"}
+                        onClick={() => void handleAlertStatus(alert.id, "ESCALATED")}
+                      >
+                        Escalate
+                      </button>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        type="button"
+                        disabled={busy || alert.status === "RESOLVED"}
+                        onClick={() => void handleAlertStatus(alert.id, "RESOLVED")}
+                      >
+                        Resolve
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
+
+        <Panel title="Election operations chat" meta={`${formatCount(conversations.length)} chats`}>
+          <div className="stack-3">
+            <p className="muted-text">Direct, group and territory conversations are permission-scoped and durable.</p>
+            {/* Chat stays chat: a conversation is not a queue. */}
+            <div className="chat-layout">
+              <div className="conversation-list">
+                {conversations.map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    className={`conversation-button ${conversation.id === selectedConversationId ? "selected" : ""}`}
+                    onClick={() => setSelectedConversationId(conversation.id)}
+                  >
+                    <strong>{conversationTitle(conversation, user.id)}</strong>
+                    <span>
+                      {conversation.type} | {conversation.members.length} members
+                    </span>
+                    <span>{conversation.unreadCount} unread</span>
+                  </button>
+                ))}
+                {conversations.length === 0 ? (
+                  <p className="muted-text">No conversations yet. Open a territory chat or select a PU to message.</p>
+                ) : null}
+              </div>
+              <div className="message-pane">
+                <strong>{selectedConversation ? conversationTitle(selectedConversation, user.id) : "No conversation selected"}</strong>
+                <div className="message-list">
+                  {messages.map((message) => (
+                    <article key={message.id} className={`message-bubble ${message.senderUserId === user.id ? "own" : ""}`}>
+                      <strong>{message.senderName}</strong>
+                      <p>{message.body}</p>
+                      <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+                    </article>
+                  ))}
+                  {selectedConversation && messages.length === 0 ? (
+                    <p className="muted-text">No messages in this conversation yet.</p>
+                  ) : null}
+                </div>
+                <form className="message-form" onSubmit={sendMessage}>
+                  <label className="sr-only" htmlFor="situation-message">
+                    Message
+                  </label>
+                  <input
+                    id="situation-message"
+                    value={messageDraft}
+                    onChange={(event) => setMessageDraft(event.target.value)}
+                    placeholder="Send an operational update…"
+                    disabled={!selectedConversationId}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    type="submit"
+                    disabled={busy || !selectedConversationId || !messageDraft.trim()}
+                  >
+                    Send
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </Panel>
+
+        {callToken ? (
+          <Panel title="Voice">
+            {/* Callable contacts are the people already in this officer's
+                conversations, which the API has authorized for contact. */}
+            <VoiceCallPanel
+              token={callToken}
+              contacts={conversations
+                .flatMap((conversation) => conversation.members)
+                .filter((member) => member.userId !== user?.id)
+                .filter((member, index, all) => all.findIndex((item) => item.userId === member.userId) === index)
+                .map((member) => ({ userId: member.userId, name: member.name, role: member.role }))}
+            />
+          </Panel>
+        ) : null}
+
+        <Panel title="Operational timeline" meta={`${formatCount(timeline.length)} events`}>
+          <div className="stack-3">
+            <p className="muted-text">
+              Reports, alerts, incidents, messages, field activity and durable realtime outbox events.
+            </p>
+            {/* A timeline is ordered by time and read downwards; columns would
+                add nothing a table row does better. */}
+            <div className="timeline-list">
+              {timeline.map((item) => (
+                <article key={`${item.type}-${item.id}`} className="timeline-item">
+                  <span className={`timeline-dot ${item.severity === "CRITICAL" ? "critical" : ""}`} />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                    <p className="muted-text">
+                      {item.type} | {new Date(item.occurredAt).toLocaleString()} | {item.pollingUnitId || "territory"}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
+            {timeline.length === 0 ? <StateView kind="empty" title="No timeline events for this date" /> : null}
+          </div>
+        </Panel>
+      </div>
     </main>
   );
 }

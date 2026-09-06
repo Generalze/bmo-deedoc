@@ -847,3 +847,27 @@
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* ---- Consent rows ------------------------------------------------------
+ * A checkbox whose label is a sentence. These were written as a <label>
+ * wrapping a second <label>, which is invalid and leaves the click target
+ * ambiguous: the browser may focus either control, or neither.
+ */
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-200);
+  line-height: var(--lh-normal);
+}
+
+.consent input[type="checkbox"] {
+  margin: 0.25em 0 0;
+  flex: none;
+}
+
+/* A form that is the whole page rather than a panel inside one. */
+.form-page {
+  max-width: 46rem;
+  margin-inline: auto;
+}
