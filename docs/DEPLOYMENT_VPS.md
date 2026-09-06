@@ -312,6 +312,78 @@ npm run rehearse:migration -- --from-dump backup-20260810.dump
 Rehearsing against empty tables proves very little — table rewrites, `NOT NULL`
 additions, and unique-index creation only fail with rows present.
 
+## 15b. Staging
+
+Staging runs the same topology with the same settings. An environment that is
+relaxed is not testing what you are about to ship.
+
+Three things separate it from production, and they are the reason
+`.env.staging.example` exists rather than a copy of the production contract:
+
+1. **It never touches production data.** Different database, different bucket,
+   different Redis, different JWT secret. A staging instance pointed at the
+   production bucket lets a UAT tester open a real member's identity document,
+   and a shared JWT secret means a token minted on staging is valid in
+   production.
+2. **It carries synthetic people only.** Real voter records are personal data
+   belonging to real Nigerians and do not belong in a test system.
+3. **Payouts stay off.** Staging proves the payout path refuses correctly. It is
+   not where money moves.
+
+### Bringing staging up
+
+```bash
+cp .env.staging.example .env.staging          # then fill it in
+npm run verify:repository                     # includes the TURN cross-check
+npm run verify:turn -- --env-file .env.staging
+
+docker compose -f docker-compose.prod.yml --env-file .env.staging up -d --wait
+npm run deploy:migrate
+npm run deploy:bootstrap
+npm run import:reference:ogun -- --release-dir reference/ogun/<release-id> --apply
+```
+
+### Synthetic operators for UAT
+
+The seed creates no people on purpose. Staging needs one of each role so a
+tester can exercise a flow end to end:
+
+```bash
+STAGING_PERSONA_PASSWORD='<at least 12 characters>' npm run bootstrap:staging-personas
+```
+
+It resolves a real Ogun ward — one whose State Constituency edge has been
+reviewed, because registration refuses an unreviewed one — and attaches every
+persona to it. It invents no territory, and it fabricates no
+voter-registration document: a synthetic identity document is exactly what the
+validator queue must never be trained to accept.
+
+It refuses to run against a database holding accounts that are not staging
+personas, which is what stops it being pointed at production by accident.
+
+### Post-deploy verification
+
+```bash
+npm run smoke:deployment -- --api https://staging.ops.example.org/api                             --web https://staging.ops.example.org
+```
+
+Read-only, unauthenticated, creates nothing. It checks that the deployment is
+**correct and safe**, not merely that it answers:
+
+| Check | Why it is here |
+|---|---|
+| `/readyz` returns 200 | `/health` answers `ok` unconditionally, so a deployment can report healthy with no database behind it. |
+| Database and Ogun reference data reachable | Without reference data a member cannot register at all: the server derives their constituency chain from the ward. |
+| `PAYOUT_EXECUTION_ENABLED` is false | The single most consequential thing to get wrong on a fresh deployment. Pass `--expect-payouts-enabled` only when it was deliberate. |
+| Only Ogun is offered publicly | A deployment offering more than Ogun is serving the wrong product. |
+| Protected routes refuse anonymous callers | |
+| Security headers present | |
+| The site root forwards to the single sign-in door | |
+
+A non-zero exit is a failed deployment. It must never be converted into a pass.
+
+---
+
 ## 16. Rollback
 
 Images are tagged by `IMAGE_TAG`. To roll back application code:
@@ -366,5 +438,5 @@ additivity rehearsal must not be cited as evidence of it.
 ## What is not covered here
 
 - Multi-host scale-out. The topology is intentionally single-VPS; service boundaries allow later separation without application redesign.
-- Off-host log shipping, metrics, and alerting (`ERROR_TRACKING_DSN` and `OTEL_EXPORTER_OTLP_ENDPOINT` are wired but unset).
+- Off-host log shipping, metrics, and alerting (`ERROR_TRACKING_DSN` and `OTEL_EXPORTER_OTLP_ENDPOINT` are wired but unset). Staging is the right place to find out whether a trace tells you anything.
 - Automated backup scheduling. §11 gives the command; cron or a systemd timer is an operator decision.

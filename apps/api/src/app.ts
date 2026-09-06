@@ -2,7 +2,10 @@ import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
+import { OGUN_STATE_ID } from "@pics-nigeria/shared";
 import { env } from "./env";
+import { prisma } from "./prisma";
+import { getRealtimeGatewayStatus } from "./realtime/gateway";
 import adminRoutes from "./routes/admin";
 import agentRoutes from "./routes/agent";
 import authRoutes from "./routes/auth";
@@ -79,8 +82,64 @@ export function createApp() {
   );
   app.use(express.json({ limit: env.API_JSON_BODY_LIMIT }));
 
+  /**
+   * Liveness. The process is up and can answer.
+   *
+   * Deliberately cheap and deliberately unconditional: it is what the container
+   * healthcheck and the load balancer poll, and a dependency outage must not
+   * cause the orchestrator to start killing otherwise healthy processes.
+   */
   app.get("/health", (_request, response) => {
     response.json({ status: "ok" });
+  });
+
+  /**
+   * Readiness. The process can actually serve requests.
+   *
+   * /health answers "ok" whether or not the database exists, so a deployment
+   * could report healthy while nothing worked. This is what a post-deploy check
+   * should look at: it touches the dependencies, reports what it found, and
+   * returns 503 when the platform cannot do its job.
+   *
+   * It is unauthenticated on purpose and says nothing an attacker can use — no
+   * versions, no hostnames, no counts beyond whether reference data exists.
+   */
+  app.get("/readyz", async (_request, response) => {
+    const checks: Record<string, { ok: boolean; detail?: string }> = {};
+
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      checks.database = { ok: true };
+    } catch {
+      checks.database = { ok: false, detail: "unreachable" };
+    }
+
+    /**
+     * Ogun reference data is a precondition, not an optimisation. Without it a
+     * member cannot register — the server derives their constituency chain from
+     * the ward — so an instance without it is up but unusable.
+     */
+    try {
+      const wards = await prisma.ward.count({ where: { stateId: OGUN_STATE_ID } });
+      checks.referenceData = wards > 0 ? { ok: true } : { ok: false, detail: "no Ogun wards loaded" };
+    } catch {
+      checks.referenceData = { ok: false, detail: "unreadable" };
+    }
+
+    const realtime = getRealtimeGatewayStatus();
+    // Degraded realtime is reported, never fatal: REST carries the platform,
+    // and refusing readiness would take the whole deployment down for a
+    // subsystem that has a documented fallback.
+    checks.realtime = { ok: true, detail: realtime.runtimeStatus };
+
+    const ready = Object.values(checks).every((check) => check.ok);
+    return response.status(ready ? 200 : 503).json({
+      status: ready ? "ready" : "not_ready",
+      checks,
+      // Read by the post-deploy smoke test. Payouts must be disabled on a fresh
+      // deployment; enabling them is a deliberate, separate operator action.
+      payoutExecutionEnabled: env.PAYOUT_EXECUTION_ENABLED,
+    });
   });
 
   app.use("/auth/login", loginLimiter);

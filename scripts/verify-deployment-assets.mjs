@@ -33,6 +33,9 @@ const requiredAssets = [
   "deploy/coturn/turnserver.conf.template",
   "deploy/coturn/entrypoint.sh",
   ".env.production.example",
+  ".env.staging.example",
+  "deploy/storage/bucket-policy.json",
+  "deploy/storage/README.md",
   "docs/DEPLOYMENT_VPS.md",
   ".dockerignore",
 ];
