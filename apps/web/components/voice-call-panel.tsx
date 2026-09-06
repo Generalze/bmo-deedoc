@@ -1,31 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ElectionDayCallItem, ElectionDayWebrtcConfig } from "@pics-nigeria/shared";
-import {
-  ApiError,
-  acceptElectionDayCall,
-  endElectionDayCall,
-  fetchElectionDayCalls,
-  fetchElectionDayWebrtcConfig,
-  initiateElectionDayCall,
-  rejectElectionDayCall,
-} from "../lib/api";
+import { useState } from "react";
+import type { ElectionDayCallItem } from "@pics-nigeria/shared";
+import { DataTable, EmptyRow, Notice, Panel, StateView, Toolbar, ToolbarEnd, ToolbarField, formatCount } from "./ui";
+import { formatElapsed, useCallCenter, type CallContact } from "./call-center";
 
 type Props = {
   token: string;
   /** Contacts the signed-in user is permitted to call. */
-  contacts: Array<{ userId: string; name: string; role?: string }>;
+  contacts: CallContact[];
 };
-
-function formatDuration(seconds: number | null) {
-  if (seconds === null) {
-    return "—";
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${minutes}:${String(remainder).padStart(2, "0")}`;
-}
 
 function statusLabel(call: ElectionDayCallItem) {
   if (call.status === "ENDED") {
@@ -40,227 +24,143 @@ function statusLabel(call: ElectionDayCallItem) {
   return call.status === "CONNECTED" ? "Connected" : "Ringing";
 }
 
+function statusTone(call: ElectionDayCallItem) {
+  if (call.status !== "ENDED") return "pill pill-pending";
+  switch (call.endReason) {
+    case "MISSED":
+      return "pill pill-error";
+    case "REJECTED":
+      return "pill pill-refused";
+    case "CANCELLED":
+      return "pill pill-stale";
+    default:
+      return "pill pill-executed";
+  }
+}
+
 /**
- * Election Day voice calling surface (Feature 111).
+ * The Situation Room's view of voice.
  *
- * Lifecycle transitions are owned by the REST API, which holds the durable call
- * record. This component reflects that state and drives the local WebRTC peer
- * connection; it never invents a status of its own, so what an officer sees
- * always matches what PostgreSQL recorded.
+ * The call itself is owned by the call centre above the page tree, so this
+ * panel starts calls and reads history — it no longer holds the peer
+ * connection, and a call it started survives navigating away from this page.
  *
  * Calls are never recorded. No media is captured or uploaded anywhere.
  */
-export function VoiceCallPanel({ token, contacts }: Props) {
-  const [config, setConfig] = useState<ElectionDayWebrtcConfig | null>(null);
-  const [calls, setCalls] = useState<ElectionDayCallItem[]>([]);
-  const [activeCall, setActiveCall] = useState<ElectionDayCallItem | null>(null);
+export function VoiceCallPanel({ contacts }: Props) {
+  const center = useCallCenter();
   const [targetUserId, setTargetUserId] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  const peerRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const history = await fetchElectionDayCalls(token, { limit: 20 });
-      setCalls(history);
-      const live = history.find((call) => call.status !== "ENDED") || null;
-      setActiveCall(live);
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Call history could not be loaded.");
-    }
-  }, [token]);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        setConfig(await fetchElectionDayWebrtcConfig(token));
-      } catch {
-        // A missing ICE configuration disables calling but must not break the
-        // surrounding operations view.
-      }
-      await refresh();
-    })();
-  }, [token, refresh]);
-
-  /** Releases the microphone and peer connection. Always safe to call twice. */
-  const teardownMedia = useCallback(() => {
-    peerRef.current?.close();
-    peerRef.current = null;
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-  }, []);
-
-  useEffect(() => teardownMedia, [teardownMedia]);
-
-  const openMicrophone = useCallback(async () => {
-    if (!config) {
-      throw new Error("Call configuration is unavailable.");
-    }
-    // Permission is requested only when a call actually starts, never on load.
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    localStreamRef.current = stream;
-
-    const peer = new RTCPeerConnection({ iceServers: config.iceServers });
-    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
-    peer.ontrack = (event) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = event.streams[0];
-      }
-    };
-    peerRef.current = peer;
-    return peer;
-  }, [config]);
-
-  const startCall = useCallback(async () => {
-    if (!targetUserId) {
-      setError("Choose someone to call.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await openMicrophone();
-      const call = await initiateElectionDayCall(token, { targetUserId });
-      setActiveCall(call);
-      await refresh();
-    } catch (caught) {
-      teardownMedia();
-      setError(caught instanceof ApiError ? caught.message : "The call could not be started.");
-    } finally {
-      setBusy(false);
-    }
-  }, [targetUserId, token, openMicrophone, refresh, teardownMedia]);
-
-  const answerCall = useCallback(async () => {
-    if (!activeCall) return;
-    setBusy(true);
-    try {
-      await openMicrophone();
-      setActiveCall(await acceptElectionDayCall(token, activeCall.id));
-      await refresh();
-    } catch (caught) {
-      teardownMedia();
-      setError(caught instanceof ApiError ? caught.message : "The call could not be answered.");
-    } finally {
-      setBusy(false);
-    }
-  }, [activeCall, token, openMicrophone, refresh, teardownMedia]);
-
-  const declineCall = useCallback(async () => {
-    if (!activeCall) return;
-    setBusy(true);
-    try {
-      await rejectElectionDayCall(token, activeCall.id);
-      teardownMedia();
-      setActiveCall(null);
-      await refresh();
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "The call could not be declined.");
-    } finally {
-      setBusy(false);
-    }
-  }, [activeCall, token, refresh, teardownMedia]);
-
-  const hangUp = useCallback(async () => {
-    if (!activeCall) return;
-    setBusy(true);
-    try {
-      await endElectionDayCall(token, activeCall.id, "COMPLETED");
-      teardownMedia();
-      setActiveCall(null);
-      await refresh();
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "The call could not be ended.");
-    } finally {
-      setBusy(false);
-    }
-  }, [activeCall, token, refresh, teardownMedia]);
+  if (!center) {
+    return (
+      <Panel title="Voice">
+        <StateView kind="error" title="Voice is unavailable" detail="The call centre is not mounted." />
+      </Panel>
+    );
+  }
 
   const callable = contacts.filter((contact) => contact.userId);
+  const busy = center.phase !== "idle";
 
   return (
-    <section className="call-panel" aria-label="Election Day voice calling">
-      <div className="call-panel-head">
-        <h2>Voice</h2>
-        <span className="call-recording-note">Calls are never recorded</span>
+    <Panel
+      title="Voice"
+      meta={
+        center.connected ? (
+          <span className="pill pill-executed">realtime connected</span>
+        ) : (
+          <span className="pill pill-refused">realtime offline</span>
+        )
+      }
+      flush
+    >
+      <Toolbar>
+        <ToolbarField label="Call">
+          <select
+            value={targetUserId}
+            onChange={(event) => setTargetUserId(event.target.value)}
+            disabled={busy || !center.ready}
+          >
+            <option value="">Select a contact…</option>
+            {callable.map((contact) => (
+              <option key={contact.userId} value={contact.userId}>
+                {contact.name}
+                {contact.role ? ` · ${contact.role.replace(/_/g, " ").toLowerCase()}` : ""}
+              </option>
+            ))}
+          </select>
+        </ToolbarField>
+        <ToolbarEnd>
+          <button
+            className="btn btn-sm btn-primary"
+            type="button"
+            onClick={() => void center.start(targetUserId)}
+            disabled={busy || !targetUserId || !center.ready || !center.connected}
+          >
+            {busy ? "In a call" : "Start call"}
+          </button>
+        </ToolbarEnd>
+      </Toolbar>
+
+      <div className="panel-body stack-2">
+        {!center.connected ? (
+          <Notice tone="refused" title="Not connected to the realtime gateway">
+            <span>
+              Calls need the signalling connection. Without it a call can be recorded but no audio can be exchanged.
+            </span>
+          </Notice>
+        ) : null}
+
+        {center.config && !center.config.turnConfigured ? (
+          <Notice tone="legacy" title="No TURN relay configured">
+            <span>
+              Calls will connect between devices that can reach each other directly, and will fail on restrictive
+              mobile networks until a TURN relay is configured.
+            </span>
+          </Notice>
+        ) : null}
+
+        {center.error ? (
+          <Notice tone="error" title="Call problem">
+            <span>{center.error}</span>
+          </Notice>
+        ) : null}
+
+        <p className="muted-text">Calls are never recorded. No media is captured, stored or uploaded.</p>
       </div>
 
-      {error ? <p className="call-error">{error}</p> : null}
+      <DataTable
+        caption="Recent calls"
+        head={
+          <tr>
+            <th>Outcome</th>
+            <th>Participants</th>
+            <th>Started</th>
+            <th className="numeric">Duration</th>
+          </tr>
+        }
+      >
+        {center.history.length === 0 ? (
+          <EmptyRow colSpan={4}>No calls yet.</EmptyRow>
+        ) : (
+          center.history.map((call) => (
+            <tr key={call.id}>
+              <td>
+                <span className={statusTone(call)}>{statusLabel(call).toLowerCase()}</span>
+              </td>
+              <td>{call.participants.map((participant) => participant.name).join(" ↔ ")}</td>
+              <td className="muted-text">{new Date(call.startedAt).toLocaleString()}</td>
+              <td className="numeric">
+                {call.durationSeconds === null ? "—" : formatElapsed(call.durationSeconds)}
+              </td>
+            </tr>
+          ))
+        )}
+      </DataTable>
 
-      {config && !config.turnConfigured ? (
-        <p className="call-warning">
-          No TURN relay is configured. Calls may not connect for devices on restrictive mobile networks.
-        </p>
-      ) : null}
-
-      {activeCall ? (
-        <div className="call-active">
-          <p className="call-active-status">{statusLabel(activeCall)}</p>
-          <p className="call-active-party">
-            {activeCall.participants.map((participant) => participant.name).join(" ↔ ")}
-          </p>
-          <div className="call-actions">
-            {activeCall.status === "RINGING" && activeCall.initiatorUserId !== activeCall.participants.find((p) => !p.isInitiator)?.userId ? (
-              <>
-                <button type="button" className="call-accept" onClick={() => void answerCall()} disabled={busy}>
-                  Answer
-                </button>
-                <button type="button" className="call-decline" onClick={() => void declineCall()} disabled={busy}>
-                  Decline
-                </button>
-              </>
-            ) : null}
-            <button type="button" className="call-end" onClick={() => void hangUp()} disabled={busy}>
-              {activeCall.status === "CONNECTED" ? "Hang up" : "Cancel"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="call-start">
-          <label className="call-select">
-            Call
-            <select value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)}>
-              <option value="">Select a contact…</option>
-              {callable.map((contact) => (
-                <option key={contact.userId} value={contact.userId}>
-                  {contact.name}
-                  {contact.role ? ` · ${contact.role.replace(/_/g, " ")}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="call-start-button" onClick={() => void startCall()} disabled={busy || !targetUserId}>
-            Start call
-          </button>
-        </div>
-      )}
-
-      {/* Remote audio sink. Muted locally until a track arrives. */}
-      <audio ref={remoteAudioRef} autoPlay playsInline />
-
-      <h3 className="call-history-title">Recent calls</h3>
-      {calls.length === 0 ? (
-        <p className="call-empty">No calls yet.</p>
-      ) : (
-        <ul className="call-history">
-          {calls.map((call) => (
-            <li key={call.id}>
-              <span className={`call-status call-status-${call.endReason?.toLowerCase() || call.status.toLowerCase()}`}>
-                {statusLabel(call)}
-              </span>
-              <span className="call-history-party">
-                {call.participants.map((participant) => participant.name).join(" ↔ ")}
-              </span>
-              <span className="call-history-meta">
-                {new Date(call.startedAt).toLocaleString()} · {formatDuration(call.durationSeconds)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+      <div className="panel-body">
+        <span className="muted-text">{formatCount(center.history.length)} recorded in the durable call log</span>
+      </div>
+    </Panel>
   );
 }
